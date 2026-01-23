@@ -7,36 +7,35 @@ EmptyList = function(latent_state_names){
   res}
 
 
-
-PiecewiseLinearTbf = function(breakpoints = NULL){
+MakeTBF = function(breakpoints = NULL){
   breakpoints = c(1, breakpoints)
   breakpoints = sort(unique(breakpoints))
-  res =  matrix(0, max(breakpoints), length(breakpoints))
-  res[,1]=1
-  if(length(breakpoints)>1){
-    for(i in seq(2, length(breakpoints))){
-      res[seq(breakpoints[i-1]),i] = 0
-      res[-seq(breakpoints[i]),i] = 1
-      res[seq(breakpoints[i-1], breakpoints[i]),i] = seq(0, 1, length.out = breakpoints[i] - breakpoints[i-1] +1)
-    }
-  }
-  res
+  return(breakpoints)
 }
 
-PlotTbf = function(tbf){
-  plot(
-    row(tbf),
-    tbf,
-    col = col(tbf),
-    xlab = "time counter variable",
-    ylab = "temporal basis function",
-    type = "n")
-  for(i in seq(ncol(tbf))){
-    breakpoints =unique(c(1, nrow(tbf), which(diff(diff(tbf[,i]))!=0)+1))
-    lines(seq(nrow(tbf)), tbf[,i] + i/600, col = i)
-    points(breakpoints, tbf[breakpoints, i] + i/600,col=i)
+
+PlotTBF = function(tbf, log.x = T){
+  plot(1, 1, type = "n", ylim = c(0,1), xlim = c(1, max(max(tbf)*1.14, max(tbf) + 5)), log = c("", "x")[1+log.x],
+       ylab = "temporal basis function value", xlab = "time counter")
+  abline(h=1, col = "gray")
+  abline(h=0, col = "gray")
+  abline(v=0, col = "gray")
+  abline(v=max(tbf), col = 1)
+  abline(v=max(tbf), col = 1)
+  text(x = max(max(tbf)*1.07, max(tbf) + 1), y = .5, labels = "constant after this time counter", srt = 90)
+  if(length(tbf)==1) points(tbf, 1)
+  if(length(tbf)>1){
+    points(seq(tbf[1], tbf[2]), seq(1, 0, length.out = tbf[2]- tbf[1] +1), type = "b")
+    points(seq(tbf[length(tbf)-1], tbf[length(tbf)]), seq(0, 1, length.out = tbf[length(tbf)]- tbf[length(tbf)-1] +1), type = "b")
+  }
+  if(length(tbf)>2){
+    for(i in seq(2, length(tbf)-1)){
+      points(seq(tbf[i-1], tbf[i]), seq(0, 1, length.out = tbf[i]- tbf[i-1] +1), type = "b")
+      points(seq(tbf[i], tbf[i+1]), seq(1,0, length.out = tbf[i+1]- tbf[i] +1), type = "b")
+    }
   }
 }
+
 
 BeginTransitionModel = function(
     explanatory_variable_names, temporal_basis_function_list, latent_states_names
@@ -61,69 +60,163 @@ BeginTransitionModel = function(
               "explanatory_variable_names" = explanatory_variable_names))
 }
 
-AddTransitionParams = function(begun_transition_model){
-  begun_transition_model$transition_model_params = lapply(
-    begun_transition_model$latent_states_names, function(latent_state_name){
-      lapply(begun_transition_model$variable_basis_interactions[latent_state_name,],
+CreateTransitionParams = function(transition_model){
+  transition_model_params = lapply(
+    transition_model$latent_states_names, function(latent_state_name){
+      lapply(transition_model$variable_basis_interactions[latent_state_name,],
              function(tbf_name){
                if(is.na(tbf_name))return(matrix(nrow = 0, ncol = 0))
                res = matrix(0,
-                            nrow = ncol(begun_transition_model$temporal_basis_function_list[[tbf_name]]),
-                            ncol = sum(begun_transition_model$possible_transitions[latent_state_name,])-1)
-               colnames(res) = begun_transition_model$latent_states_names[
-                 setdiff(which(begun_transition_model$possible_transitions[latent_state_name,]!=0), match(latent_state_name, begun_transition_model$latent_states_names))
-                 ]
+                            nrow = length(transition_model$temporal_basis_function_list[[tbf_name]]+1),
+                            ncol = sum(transition_model$possible_transitions[latent_state_name,])-1)
+               colnames(res) = transition_model$latent_states_names[
+                 setdiff(which(transition_model$possible_transitions[latent_state_name,]!=0), match(latent_state_name, transition_model$latent_states_names))
+               ]
                return(res)
              })
     })
-  names(begun_transition_model$transition_model_params) = begun_transition_model$latent_states_names
-  return(begun_transition_model)
+  names(transition_model_params) = transition_model$latent_states_names
+  return(transition_model_params)
 }
 
 
 
-Softmax = function(multiplied_tbfs)
+PlotTransitionGraph = function(transition_model){
+  g = transition_model$possible_transitions
+  diag(g) = 0
+  g = igraph::graph_from_adjacency_matrix(g)
+  plot(g)
+}
 
-sample_latent_state = function(transition_model, explanatory_variables, starting_states, seed = 1){
-  set.seed(seed)
-  latent_state = matrix(0, nrow(explanatory_variables), length(starting_states))
-  counter_var =  matrix(0, nrow(explanatory_variables), length(starting_states))
-  counter_var[1,]=1
-  t=2
-  # multiplicating each tbf by the corresponding parameter to save time
-  tbf_times_params = list()
-  for(origin_latent_state in row.names(transition_model$variable_basis_interactions)){
-    tbf_times_params[[origin_latent_state]] = list()
-    for(expanatory_variable in colnames(transition_model$variable_basis_interactions)){
-      tbf_times_params[[origin_latent_state]][[expanatory_variable]] = NA
-      chosen_basis= transition_model$variable_basis_interactions[origin_latent_state,expanatory_variable]
-      if(!is.na(chosen_basis)){
-        tbf_times_params[[origin_latent_state]][[expanatory_variable]] =
-          transition_model$temporal_basis_function_list[[chosen_basis]] %*%
-          transition_model$transition_model_params[[origin_latent_state]][[expanatory_variable]]
-      }
-    }
+AddEmissionModel = function(
+    transition_model,
+    fixed_emission_param_names = NULL,
+    estimated_emission_param_names = NULL,
+    explanatory_variable_names = NULL,
+    observed_variables_names
+    ){
+  res = list()
+  # necessary
+  res$log_likelihood =      "function(obs,       estimated_emission_param, fixed_emission_param, emission_explanatory_variable)= (some log_likelihood for obs)"
+  # can be obtained from log likelihood
+  res$log_likelihood_grad = "function(obs,       estimated_emission_param, fixed_emission_param, emission_explanatory_variable) = (gradient of log_likelihood(obs) with respect to emission_param)"
+  # must be coded by hand because mesures of random variables are not absolutely continuous
+  res$observation_sampler = "function(n_samples, estimated_emission_param, fixed_emission_param, emission_explanatory_variable)"
+  # necessary
+  res$log_prior =           "function(estimated_emission_param_mat) = (some prior log-density)"
+  # may be obtained using a MCMC
+  res$log_prior_sampler =   "function(n_samples)"
+  # creating matrix of fixed emission params at the right format. To be filled by the user
+  if(!is.null(estimated_emission_param_names)){
+    res$fixed_emission_params = matrix(NA, length(fixed_emission_param_names), length(transition_model$latent_states_names))
+    row.names(res$fixed_emission_params) = fixed_emission_param_names
+    colnames(res$fixed_emission_params) =  transition_model$latent_states_names
+    message("A matrix of fixed emission parameters has been created. It must be filled by hand by the User.")
+  }
+  res$estimated_emission_param_names = estimated_emission_param_names
+  res$explanatory_variable_names = explanatory_variable_names
+  res$observerd_variables_names = observerd_variables_names
+  return(list(transition = transition_model, emission = res))
+}
+
+
+data_list = 1
+CheckDataList(data_list)
+data_list = list(1, list())
+CheckDataList(data_list)
+data_list = list(list("Donald_Trump" = 1, "Vladimir_Putin" = 1, "Xi_Jing_Ping" = 1, "Emmanuel_Macron" = 1))
+CheckDataList(data_list)
+data_list = list(list("explanatory_variables_transition" = 1))
+CheckDataList(data_list)
+data_list = list(list("explanatory_variables_transition" = matrix(1)))
+CheckDataList(data_list)
+data_list = list(list("explanatory_variables_transition" = matrix("1")))
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(1)),
+  obs_2 = list("explanatory_variables_transition" = matrix(1, 1, 2))
+  )
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(nrow=10, ncol=0)),
+  obs_2 = list("explanatory_variables_transition" = matrix(nrow=1, ncol=0))
+  )
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10)))),
+  obs_2 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(11, 20))))
+  )
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10)))),
+  obs_2 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))))
+  )
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = NULL),
+  obs_2 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = NULL)
+  )
+CheckDataList(data_list)
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = matrix(1, 1, 2)),
+  obs_2 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = matrix(1))
+  )
+CheckDataList(data_list)
+
+data_list = list(
+  obs_1 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = matrix(1, 1, 2)),
+  obs_2 = list("explanatory_variables_transition" = matrix(seq(1000), ncol = 10, dimnames = list(NULL, seq(10))), "explanatory_variables_emission" = matrix(1, 1, 2))
+  )
+CheckDataList(data_list)
+
+CheckMatrixList = function(data_list, name){
+  # checking that they are matrices
+  if(any(sapply(data_list, function(x)!is.matrix(x[[name]])))){
+    stop(paste("all", name, "must be matrices"))
+  }
+  # checking dimensions
+  if(length(unique(sapply(data_list, function(x)ncol(x[[name]]))))>1){
+    stop(paste("all", name, "must have the same number of columns"))
+  }
+  if(unique(sapply(data_list, function(x)ncol(x[[name]]))) == 0){
+    stop(paste("all", name, "must have at least one column"))
+  }
+  # checking that they are numeric
+  if(any(sapply(data_list, function(x)!is.numeric(x[[name]])))){
+    stop(paste("all", name, "must be numeric, categorical data can be handeled using model.matrix()"))
+  }
+  # checking names
+  if(length(unique(lapply(data_list, function(x)colnames(x[[name]]))))>1){
+    stop(paste("all", name, "must have the same column names"))
+  }
+}
+
+CheckDataList = function(data_list){
+  # global format
+  if(!is.list(data_list))stop("data_list must be a list (qui aurait pu prédire?)")
+  if(any(!sapply(data_list, is.list)))stop("Every element of data_list must be a list")
+  # checking names in every sublist
+  if(any(sapply(data_list, function(x)!all(names(x)%in%c("explanatory_variables_emission", "explanatory_variables_transition", "emission")))))stop(
+    "The possible names of an element from data_list are: explanatory_variables_emission, explanatory_variables_transition, emission"
+  )
+
+  # checking transition data
+  CheckMatrixList(data_list, "explanatory_variables_transition")
+
+  # checking emission data
+  # checking that either all are NULL or all are non-NULL
+  if(!(sum(sapply(data_list, function(x)is.null(x[["explanatory_variables_emission"]])))%in%c(0, length(data_list)))){
+    stop("The explanatory_variables_emission must be either all NULL or all non-NULL")
+  }
+  if(!is.null(data_list[[1]][["explanatory_variables_emission"]])){
+    CheckMatrixList(data_list, "explanatory_variables_emission")
   }
 
-  for(t in seq(2, nrow(explanatory_variables))){
+  # checking observations
 
-    latent_state[t,] =
-mapply(
-  function(current_latent_state, current_counter_var){
-    # latent states that can be reached from this one
-    possible_new_latent_states = transition_model$latent_states_names[transition_model$possible_transitions[current_latent_state,]==1]
-    # names of temporal basis functions that interact with the covariates
-    implied_tbfs = as.vector(na.omit(transition_model$variable_basis_interactions[current_latent_state,]))
-    unique_implied_tbfs = unique(implied_tbfs)
-    # extracting the right rows from the tbfs using the coutner variable
-    unique_implied_tbfs_rows = lapply(unique_implied_tbfs, function(tbf_name)transition_model$temporal_basis_function_list[[tbf_name]][min(current_counter_var, nrow(transition_model$temporal_basis_function_list[[tbf_name]])),])
-    names(unique_implied_tbfs_rows) = unique_implied_tbfs
-    # getting the
-    implied_covariates = transition_model$variable_basis_interactions[current_latent_state,]
-  },
-  current_latent_state = latent_state[t-1,],
-  current_counter_var = counter_var[t-1,]
-)
-  }
+
+
+  # check equality of sequences length
+
 }
 

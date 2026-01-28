@@ -162,16 +162,9 @@ checkDataList = function(data_list){
 
   nvar_emission = ncol(data_list[[1]]$explanatory_variables_emission)
   if(is.null(data_list[[1]]$explanatory_variables_emission))nvar_emission = 0
-  message(paste("data_list of", length(data_list), "sequences of observations with", ncol(data_list[[1]]$explanatory_variables_transition), "explanatory variables for the transition and", nvar_emission, "explanatory variables for the emission successfully checked"))
+  message(paste("data_list successfully checked, there are", length(data_list), "sequences of observations, ", ncol(data_list[[1]]$explanatory_variables_transition), "explanatory variables for the transition, ", nvar_emission, "explanatory variables for the emission."))
+  message("----------")
 }
-
-
-
-
-emptyList = function(latent_state_names){
-  res = lapply(latent_state_names, function(x)NULL)
-  names(res) = latent_state_names
-  res}
 
 
 #' makeTbf()
@@ -219,6 +212,12 @@ plotTbf = function(tbf, log.x = T){
 beginTransitionModel = function(
     data_list, temporal_basis_function_list, latent_states_names
 ){
+  # sanity check and reformatting of tbf list
+  temporal_basis_function_list = lapply(temporal_basis_function_list, makeTbf)
+  if(is.null(names(temporal_basis_function_list)))stop("temporal_basis_function_list must be a named list.")
+  message(paste("temporal_basis_function_list successfully checked, there are", length(temporal_basis_function_list), "temporal basis functions"))
+  message("----------")
+
   # getting the explanatory variable names from the data_list
   explanatory_variable_names = colnames(data_list[[1]]$explanatory_variables_transition)
 
@@ -227,95 +226,224 @@ beginTransitionModel = function(
   row.names(possible_transitions) = latent_states_names
   colnames(possible_transitions) = latent_states_names
   names(dimnames(possible_transitions)) = c("from", "to")
-  message("By default, the matrix of authorized transitions between the latent states has been set to 1 everywhere. To forbid a transition, set the corresponding coefficient to 0")
-
+  message(paste("Authorized transition matrix between the ", length(latent_states_names), " latent states created.
+  - Filled with 1's everywhere, all transitions are possible
+  - To forbid a transition between two latent states, set the corresponding coefficient to 0"
+  ))
+  message("----------")
   # table of interactions between explanatory variables and temporal basis functions
   variable_basis_interactions = matrix(1, length(latent_states_names), length(explanatory_variable_names))
   row.names(variable_basis_interactions) = latent_states_names
   colnames(variable_basis_interactions) = explanatory_variable_names
-  variable_basis_interactions[] = names(temporal_basis_function_list)[1]
+  variable_basis_interactions[] = NA
   names(dimnames(variable_basis_interactions)) = c("origin_latent_state", "explanatory_variable")
-  message("By default, the matrix of variable and temporal basis interaction has been filled with the name of the first temporal basis.
-        -To make the explanatory variable interact with another basis, change the name in the corresponding slot.
-         -To `kill' the variable, set the corresponding slot to NA")
+  message("Table of interactions between ", length(latent_states_names), " latent states and " , length(temporal_basis_function_list),  " temporal basis functions created.
+  -Filled with NA's everywhere.
+  -To make an explanatory variable interact with a basis, put the name of the chosen basis to the corresponding slot.
+  -To `kill' the variable, leave the corresponding slot to NA
+  -Each row of the table must have at least one non-NA slot"
+  )
+  message("----------")
 
-  return(list("possible_transitions" = possible_transitions,
-              "variable_basis_interactions" = variable_basis_interactions,
-              "latent_states_names" = latent_states_names,
-              "temporal_basis_function_list" = temporal_basis_function_list,
-              "explanatory_variable_names" = explanatory_variable_names))
+  return(list(
+    to_specify =
+      list(
+        "possible_transitions" = possible_transitions,
+        "variable_basis_interactions" = variable_basis_interactions
+      ),
+    dont_touch =
+      list(
+        "latent_states_names" = latent_states_names,
+        "temporal_basis_function_list" = temporal_basis_function_list,
+        "explanatory_variable_names" = explanatory_variable_names)
+  ))
 }
+
+
+#' emission_log_likelihood is a function that takes as arguments:
+#' - estimated_emission_param_vec, a real-valued vector of emission parameters who are estimated by the model
+#' - fixed_emission_param_vec,     a real-valued vector of emission parameters who are fixed by the user
+#' - emission, an observation from the emissions slot of an element from data_list
+#' - explanatory_variable_vec, a real-valued vector taken as a row of explanatory_variables_emission from an element from data_list
+#' Important note: the function should be evaluable and twice differentiable for any value of estimated_emission_param_vec.
+#' Be careful with parameters such as a standard deviation, a scale, and whatnot, who are positive. Those must be passed to the log !
+#' estimated_emission_param_vec and fixed_emission_param_vec are the parameters associated with one label of the latent state
+
+#' emission_log_prior is a function that takes as arguments:
+#' - estimated_emission_param_vec, a real-valued vector of emission parameters who are estimated by the model
+#' Important note: the function should be evaluable and twice differentiable for any value of estimated_emission_param_vec
+#' Be careful with parameters such as a standard deviation, a scale, and whatnot, who are positive. Those must be passed to the log !
+#' Also be careful with hard constraints such as "this parameter must be greater than that parameter".
+#' This breaks the differentiability requirement, and can also lead to monstruous posteriors (see Robert, Marin, Mergensen)
+#' Last important note : to ensure the posterior being valid, the prior must be a valid distribution as well.
+
+
+#'emission_log_likelihood =      function(estimated_emission_param_vec, fixed_emission_param_vec, emission, explanatory_variable_vec){
+#'}
+#'emission_log_likelihood_grad = function(estimated_emission_param_vec, fixed_emission_param_vec, emission, explanatory_variable_vec){
+#'}
+#'emission_log_prior = function(estimated_emission_param_mat){
+#'}
+
+checkEmissionLogLikelihood = function(f, name){
+  if(!is.function(f))stop(paste(name, " must be a function"))
+  if(any(is.na(match(formalArgs(f), c("estimated_emission_param_vec", "fixed_emission_param_vec", "emission", "explanatory_variable_vec"))))){
+    stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_vec, fixed_emission_param_vec, emission, and optionally explanatory_variable_vec"))
+  }
+  if(any(is.na(match(c("estimated_emission_param_vec", "fixed_emission_param_vec", "emission"), formalArgs(f))))){
+    stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_vec, fixed_emission_param_vec, emission, and optionally explanatory_variable_vec"))
+  }
+}
+checkEmissionLogPrior = function(f, name){
+  if(!is.function(f))stop(paste(name, " must be a function"))
+  if(formalArgs(f) != "estimated_emission_param_mat"){
+    stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_mat"))
+  }
+}
+
 beginEmissionModel = function(
+    data_list,
     latent_states_names,
     fixed_emission_param_names,
-    estimated_emission_param_names
+    estimated_emission_param_names,
+    emission_log_likelihood,  emission_log_likelihood_grad = NULL,
+    emission_log_prior, emission_log_prior_grad = NULL
 ){
+
+  # Log Likelihood of the emissions
+
+  # checking parameters
+  if(is.null(estimated_emission_param_names) & is.null(fixed_emission_param_names))stop("estimated_emission_param_names and fixed_emission_param_names cannot both be NULL")
+  # Checking the function provided for the emission log-likelihood
+  checkEmissionLogLikelihood(emission_log_likelihood, "emission_log_likelihood")
+  # messaging
+  nvar = ncol(data_list[[1]]$explanatory_variables_emission)
+  if(is.null(nvar))nvar = 0
+  nfixed = length(fixed_emission_param_names)
+  if(is.null(nfixed))nfixed = 0
+  nestimated = length(estimated_emission_param_names)
+  if(is.null(nestimated))nestimated = 0
+  message(paste("The function emission_log_likelihood has been checked succesfully, but you have to make sure that:
+  - It is a log-density for the emissions (log-likelihood) for any set of", nestimated,"real-valued estimated parameters", nfixed ,"real-valued fixed parameters, and", nvar, "explanatory variables
+  - It is defined and twice-differentiable for any real-valued vector of estimated_emission_param_vec"))
+  # gradient
+  if(is.null(emission_log_likelihood_grad)){
+    message("emission_log_likelihood_grad was not provided and is obtained by applying finite differences on emission_log_likelihood")
+    emission_log_likelihood_grad = function(estimated_emission_param_vec, fixed_emission_param_vec, emission, explanatory_variable_vec){
+      res = rep(0, length(estimated_emission_param_vec))
+      fx = emission_log_likelihood(estimated_emission_param_vec, fixed_emission_param_vec, emission, explanatory_variable_vec)
+      params_ = estimated_emission_param_vec
+      for(i in seq(length(res))){
+        params_[i] = params_[i] + 1e-6
+        res[i] =  1e6*(emission_log_likelihood(params_, fixed_emission_param_vec, emission, explanatory_variable_vec)-fx)
+        params_[i] = estimated_emission_param_vec[i]
+      }
+      return(res)
+    }
+  }
+  checkEmissionLogLikelihood(emission_log_likelihood_grad, "emission_log_likelihood_grad")
+  message("emission_log_likelihood_grad checked succesfully")
+  message("----------")
+
+  # Checking the function provided for the emission prior
+  checkEmissionLogPrior(emission_log_prior, "emission_log_prior")
+  message(paste("The function emission_log_prior has been checked succesfully, but you have to make sure that it is an actual log-density over the", length(latent_states_names), "x", length(estimated_emission_param_names), "estimated emission parameters" ))
+  if(is.null(emission_log_prior_grad)){
+    message("emission_log_prior_grad obtained by applying finite differences on emission_log_prior")
+    emission_log_prior_grad = function(estimated_emission_param_mat){
+      res = 0*estimated_emission_param_mat
+      fx = emission_log_prior(estimated_emission_param_mat)
+      params_ = estimated_emission_param_mat
+      for(i in seq(length(res))){
+        params_[i] = params_[i] + 1e-6
+        res[i] =  1e6*(emission_log_prior(params_)-fx)
+        params_[i] = estimated_emission_param_mat[i]
+      }
+      return(res)
+    }
+  }
+  checkEmissionLogPrior(emission_log_prior_grad, "emission_log_prior_grad")
+  message("emission_log_prior_grad checked succesfully")
+  message("----------")
+
+
   res = list()
-  # necessary
-  res$log_likelihood =      "function(obs,       estimated_emission_param, fixed_emission_param, emission_explanatory_variable)= (some log_likelihood for obs)"
-  # can be obtained from log likelihood
-  res$log_likelihood_grad = "function(obs,       estimated_emission_param, fixed_emission_param, emission_explanatory_variable) = (gradient of log_likelihood(obs) with respect to emission_param)"
-  # must be coded by hand because mesures of random variables are not absolutely continuous
-  res$observation_sampler = "function(n_samples, estimated_emission_param, fixed_emission_param, emission_explanatory_variable)"
-  # necessary
-  res$log_prior =           "function(estimated_emission_param_mat) = (some prior log-density)"
-  # may be obtained using a MCMC
-  res$log_prior_sampler =   "function(n_samples)"
+  res$dont_touch = list()
+  res$dont_touch$log_likelihood = emission_log_likelihood
+  res$dont_touch$log_likelihood_grad = emission_log_likelihood_grad
+  res$dont_touch$log_prior = emission_log_prior
+  res$dont_touch$log_prior_grad = emission_log_prior_grad
+  res$dont_touch$estimated_emission_param_names = estimated_emission_param_names
   # creating matrix of fixed emission params at the right format. To be filled by the user
   if(!is.null(estimated_emission_param_names)){
-    res$fixed_emission_params = matrix(NA, length(fixed_emission_param_names), length(latent_states_names))
-    row.names(res$fixed_emission_params) = fixed_emission_param_names
-    colnames(res$fixed_emission_params) =  latent_states_names
-    message("A matrix of fixed emission parameters has been created. It must be filled by hand by the User.")
+    res$to_specify = list()
+    fixed_emission_params = matrix(NA, length(fixed_emission_param_names), length(latent_states_names))
+    row.names(fixed_emission_params) = fixed_emission_param_names
+    colnames(fixed_emission_params) =  latent_states_names
+    message(paste("Matrix of", length(fixed_emission_param_names), "x", length(latent_states_names),  "fixed emission parameters created.
+  - Filled with NAs
+  - You must fill it by hand with the desired parameters"))
+    res$to_specify$fixed_emission_params = fixed_emission_params
   }
-  res$estimated_emission_param_names = estimated_emission_param_names
-  res$explanatory_variable_names = explanatory_variable_names
-  res$observerd_variables_names = observerd_variables_names
   return(res)
 }
+
 beginModel = function(
     latent_states_names,
     data_list,
     temporal_basis_function_list,
-    fixed_emission_param_names = NULL,
-    estimated_emission_param_names = NULL
+    fixed_emission_param_names,
+    estimated_emission_param_names,
+    emission_log_likelihood,  emission_log_likelihood_grad = NULL,
+    emission_log_prior, emission_log_prior_grad = NULL
+
 ){
-  checkDataList(data_list)
   res = list()
+  # check data
+  checkDataList(data_list)
+  # transition model
   res$transition_model = beginTransitionModel(
     data_list = data_list,
     temporal_basis_function_list = temporal_basis_function_list,
     latent_states_names = latent_states_names)
+  # emission model
   res$emission_model = beginEmissionModel(
-    data_list = data_list,
+    data_list,
+    latent_states_names = latent_states_names,
     fixed_emission_param_names = fixed_emission_param_names,
     estimated_emission_param_names = estimated_emission_param_names,
-    latent_states_names = latent_states_names)
+    emission_log_likelihood = emission_log_likelihood,  emission_log_likelihood_grad = emission_log_likelihood_grad,
+    emission_log_prior = emission_log_prior, emission_log_prior_grad = emission_log_prior_grad
+  )
+  res
 }
 
 
 # Creates transition parameters with the right dimensions
-CreateParams = function(model){
+createParams = function(model){
   transition_model_params = lapply(
-    transition_model$latent_states_names, function(latent_state_name){
-      lapply(transition_model$variable_basis_interactions[latent_state_name,],
+    model$transition_model$dont_touch$latent_states_names, function(latent_state_name){
+      lapply(model$transition_model$to_specify$variable_basis_interactions[latent_state_name,],
              function(tbf_name){
-               if(is.na(tbf_name))return(matrix(nrow = 0, ncol = 0))
+               if(is.na(tbf_name))return(NULL)
                res = matrix(0,
-                            nrow = length(transition_model$temporal_basis_function_list[[tbf_name]]+1),
-                            ncol = sum(transition_model$possible_transitions[latent_state_name,])-1)
-               colnames(res) = transition_model$latent_states_names[
-                 setdiff(which(transition_model$possible_transitions[latent_state_name,]!=0), match(latent_state_name, transition_model$latent_states_names))
+                            nrow = length(model$transition_model$dont_touch$temporal_basis_function_list[[tbf_name]]+1),
+                            ncol = sum(model$transition_model$to_specify$possible_transitions[latent_state_name,])-1)
+               colnames(res) = model$transition_model$dont_touch$latent_states_names[
+                 setdiff(which(model$transition_model$to_specify$possible_transitions[latent_state_name,]!=0), match(latent_state_name, model$transition_model$dont_touch$latent_states_names))
                ]
                return(res)
              })
     })
-  names(transition_model_params) = transition_model$latent_states_names
-  return(transition_model_params)
+  names(transition_model_params) = model$transition_model$dont_touch$latent_states_names
+  emission_params = matrix(0, length(model$emission_model$dont_touch$estimated_emission_param_names), length(model$transition_model$dont_touch$latent_states_names))
+  colnames(emission_params) = model$transition_model$dont_touch$latent_states_names
+  row.names(model$emission_model$dont_touch$estimated_emission_param_names) = model$emission_model$dont_touch$estimated_emission_param_names
+  return(list("transition_params" = transition_model_params, "emission_params" = emission_params))
 }
 
-PlotTransitionGraph = function(transition_model){
-  g = transition_model$possible_transitions
+plotTransitionGraph = function(model){
+  g = model$transition_model$to_specify$possible_transitions
   diag(g) = 0
   g = igraph::graph_from_adjacency_matrix(g)
   plot(g)

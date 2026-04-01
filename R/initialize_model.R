@@ -122,10 +122,10 @@ checkDataList = function(data_list){
   issues = !sapply(data_list, is.list)
   if(any(issues))stop(paste("Every element of data_list must be a list, issues at", Reduce(function(x, y)paste(x, y, sep = ", "), which(issues))))
   # checking names in every sublist
-  issues = sapply(data_list, function(x)!all(names(x)%in%c("explanatory_variables_emission", "explanatory_variables_transition", "emissions")))
+  issues = sapply(data_list, function(x)!all(names(x)%in%c("explanatory_variables_emission", "explanatory_variables_transition", "emissions", "latent_states")))
   if(any(issues))stop(
     paste(
-      "The possible names of an element from data_list are: explanatory_variables_emission, explanatory_variables_transition, emissions, issues at",
+      "The possible names of an element from data_list are: explanatory_variables_emission, explanatory_variables_transition, emissions, latent_states (for simulated data), issues at",
       Reduce(function(x, y)paste(x, y, sep = ", "), which(issues)))
   )
 
@@ -476,7 +476,15 @@ createParams = function(model){
                return(res)
              })
     })
-  names(transition_model_params) = model$transition_model$dont_touch$latent_states_names
+  names(transition_model_params) =  model$transition_model$dont_touch$latent_states_names
+  for(i in seq(length(transition_model_params), 1)){
+    for(j in seq(length(transition_model_params[[i]]), 1)){
+      if(is.null(transition_model_params[[i]][[j]]))transition_model_params[[i]][[j]] = NULL
+    }
+  }
+  for(i in seq(length(transition_model_params), 1)){
+    if(length(transition_model_params[[i]])==0)transition_model_params[[i]] = NULL
+  }
   emission_params = matrix(0, length(model$emission_model$dont_touch$estimated_emission_param_names), length(model$transition_model$dont_touch$latent_states_names))
   colnames(emission_params) = model$transition_model$dont_touch$latent_states_names
   row.names(emission_params) = model$emission_model$dont_touch$estimated_emission_param_names

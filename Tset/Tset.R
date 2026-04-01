@@ -3,7 +3,8 @@ source("R/initialize_model.R")
 # creating list of temporal basis functions
 temporal_basis_function_list = list(
   "simple_tbf" = makeTbf(),
-  "complicated_tbf" = makeTbf(breakpoints = 2^seq(1, 8))
+  "complicated_tbf" = makeTbf(breakpoints = 2^seq(1, 8)),
+  "other_complicated_tbf" = makeTbf(breakpoints = 2^seq(1, 8) + 10)
 )
 # plotting tbflist
 plotTbf(temporal_basis_function_list$simple_tbf, log.x = F)
@@ -47,13 +48,13 @@ model = beginModel(
     fixed_emission_param_vec,
     emission,
     explanatory_variable_vec){
-    if(!is.na(emission)){
+    if(!identical(NA, emission)){
       res=  0
       # PCR test
       if(!is.na(emission["PCR"])){
         res = res + dbinom(
           x = emission["PCR"], size = 1,
-          prob = fixed_emission_param_names["pcr_prob"],
+          prob = fixed_emission_param_vec["pcr_prob"],
           log = T
         )
       }
@@ -61,7 +62,7 @@ model = beginModel(
       if(!is.na(emission["sero"])){
         res = res + dbinom(
           x = emission["sero"], size = 1,
-          prob = fixed_emission_param_names["sero_prob"],
+          prob = fixed_emission_param_vec["sero_prob"],
           log = T
         )
       }
@@ -77,10 +78,11 @@ model = beginModel(
       if(emission["death"]==1){
         res = res + dbinom(
           x = emission["death"], size = 1,
-          prob = fixed_emission_param_names["death_prob"],
+          prob = fixed_emission_param_vec["death_prob"],
           log = T
         )
       }
+      return(res)
     }else{return(0)}
   },
   # log prior for the emission parameters
@@ -115,6 +117,7 @@ plotTransitionGraph(model)
 print(model$transition_model$to_specify$variable_basis_interactions)
 model$transition_model$to_specify$variable_basis_interactions[c("I", "R"),"day_temperature"] = NA
 model$transition_model$to_specify$variable_basis_interactions[c("I", "R"),"Intercept"] = "complicated_tbf"
+model$transition_model$to_specify$variable_basis_interactions[c("I"),"day_temperature"] = "other_complicated_tbf"
 model$transition_model$to_specify$variable_basis_interactions["S",] = "simple_tbf"
 print(model$transition_model$to_specify$variable_basis_interactions)
 
@@ -177,23 +180,51 @@ params$transition_params$R$Intercept[7,"S"] = -4
 params$transition_params$R$Intercept[8,"S"] = -4
 params$transition_params$R$Intercept[,"D"] = -8
 
-
+params$emission_params[,"S"] = c(37, -2)
+params$emission_params[,"I"] = c(39, 0)
+params$emission_params[,"R"] = c(37, -2)
+params$emission_params[,"D"] = c(0, -10)
 
 transition_model = model$transition_model
 emission_model = model$emission_model
 data_seq = model$data_list$individual_1
 
 
-source("R/forward.R")
+source("R/simulate_data.R")
 
-preprocessTbf(transition_model, params)
-
+set.seed(1)
 latent_states_sample = sampleLatentState(
-  n_samples = 10, model = model, initial_state = rep("S", 10), initial_time_counter = rep(1, 10),
+  n_samples = 10, model = model,
+  initial_latent_state = rep("S", 10),
+  initial_time_counter = rep(1, 10),
   params = params, data_seq = model$data_list[[1]])
-par (mfrow = c(2, 1))
+par (mfrow = c(1, 1))
+plotLatentState(latent_states_sample$latent_state[,1], model = model)
 
-plotLatentState(latent_states_sample$latent_state[,2], model = model)
+emission_sampler = function(estimated_emission_params_vec, fixed_emission_params_vec){
+  res = c("PCR" = NA, "sero" = NA, "body_temp" = NA, "death" = NA)
+  res["body_temp"] = rnorm(1, estimated_emission_params_vec["body_temp_mean"], exp(estimated_emission_params_vec["log_body_temp_sd"]))
+  if(runif(1)>.95)res["PCR"] = rbinom(1, 1, fixed_emission_params_vec["pcr_prob"])
+  if(runif(1)>.95)res["sero"] = rbinom(1, 1, fixed_emission_params_vec["sero_prob"])
+  res["death"] = rbinom(1, 1, fixed_emission_params_vec["death_prob"])
+  return(res)
+}
 
+emission_sample = sampleEmissions(
+  data_seq = data_seq, model = model, params = params,
+  latent_state_seq = latent_states_sample$latent_state[,1],
+  emission_sampler = emission_sampler
+  )
 
+data_list = addEmissionsInDataList(
+  data_list = data_list,
+  model = model, params = params,
+  emission_sampler = emission_sampler,
+  initial_latent_state = rep("S", length(data_list)),
+  initial_time_counter = rep(1, length(data_list))
+)
+data_seq = data_list[[1]]
 
+par(mfrow = c(2, 1))
+plotLatentState(data_seq$latent_states$latent_state, model)
+plot(seq(length(data_seq$emissions)), sapply(data_seq$emissions, function(x)x["body_temp"]))

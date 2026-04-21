@@ -1,4 +1,3 @@
-tbfMatch = function(tbf, tbf_ref)
 
   # x = tent_matrix(knots = c(1, seq(3)*10), eval_points = seq(30))
   # plot(x[,1])
@@ -47,6 +46,7 @@ tent_matrix <- function(knots, eval_points) {
     # exit states
     n_exit_states = apply(transition_model$to_specify$possible_transitions, 1, function(x)sum(x)-1)
     is_state_absorbing = (n_exit_states<2)
+    non_absorbing_states = transition_model$dont_touch$latent_states_names[!is_state_absorbing]
     exit_states = lapply(
       transition_model$dont_touch$latent_states_names,
       function(x)setdiff(
@@ -80,7 +80,7 @@ tent_matrix <- function(knots, eval_points) {
       }
     })
     single_to_combined_conversion =
-      lapply(transition_model$dont_touch$latent_states_names[!is_state_absorbing], function(state_name){
+      lapply(non_absorbing_states, function(state_name){
         combined_tbf = combined_tbf_per_state[[state_name]]
         out =
           lapply(tbf_used_per_state[[state_name]], function(tbf_name){
@@ -91,53 +91,117 @@ tent_matrix <- function(knots, eval_points) {
         names(out) = tbf_used_per_state[[state_name]]
         out
       })
-    names(single_to_combined_conversion) = transition_model$dont_touch$latent_states_names[!is_state_absorbing]
+    names(single_to_combined_conversion) = non_absorbing_states
     active_explanatory_variables_per_state = apply(
       transition_model$to_specify$variable_basis_interactions, 1,
       function(x)colnames(transition_model$to_specify$variable_basis_interactions)[which(!is.na(x))])
-    pre_multiplied_combined_tbf = lapply(transition_model$dont_touch$latent_states_names[!is_state_absorbing], function(state_name){
-      sapply(active_explanatory_variables_per_state[[state_name]], function(explanatory_variable_name){
-        tbf_name = model$transition_model$to_specify$variable_basis_interactions[state_name, explanatory_variable_name]
-        #print(tbf_name)
-        conversion_mat = single_to_combined_conversion[[state_name]][[tbf_name]]
-        transition_param_value = params$transition_params[[state_name]][[explanatory_variable_name]]
-        res = conversion_mat %*% transition_param_value
-      })
-    })
-    names(pre_multiplied_combined_tbf) = transition_model$dont_touch$latent_states_names[!is_state_absorbing]
 
-    return(list(
-      semi_markov_depths_per_state = semi_markov_depths_per_state,
-      exit_states = exit_states,
-      n_exit_states = n_exit_states,
-      exit_states_mat = exit_states_mat,
-      is_state_absorbing = is_state_absorbing,
-      semi_markov_depths_per_state = semi_markov_depths_per_state,
-      active_explanatory_variables_per_state = active_explanatory_variables_per_state,
-      combined_tbf_per_state = combined_tbf_per_state,
-      single_to_combined_conversion = single_to_combined_conversion))
+    pre_multiplied_combined_tbf = lapply(non_absorbing_states, function(state_name){
+      res = array(
+        0,
+        dim =  c(
+          length(combined_tbf_per_state[[state_name]]),
+          length(active_explanatory_variables_per_state[[state_name]]),
+          n_exit_states[state_name]
+        ))
+      dimnames(res) = list(
+          combined_tbf_per_state[[state_name]],
+          active_explanatory_variables_per_state[[state_name]],
+          exit_states[[state_name]]
+        )
+      res
+    })
+    names(pre_multiplied_combined_tbf) = non_absorbing_states
+    for(state_name in non_absorbing_states){
+      for(explanatory_variable in active_explanatory_variables_per_state[[state_name]]){
+        pre_multiplied_combined_tbf[[state_name]][,explanatory_variable,] <-
+          single_to_combined_conversion[[state_name]][[transition_model$to_specify$variable_basis_interactions[state_name, explanatory_variable]]] %*%
+          params$transition_params[[state_name]][[explanatory_variable]]
+      }
+    }
+
+
+    return(
+      list(
+        semi_markov_depths_per_state = semi_markov_depths_per_state,
+        exit_states = exit_states,
+        n_exit_states = n_exit_states,
+        exit_states_mat = exit_states_mat,
+        is_state_absorbing = is_state_absorbing,
+        non_absorbing_states = non_absorbing_states,
+        active_explanatory_variables_per_state = active_explanatory_variables_per_state,
+        combined_tbf_per_state = combined_tbf_per_state,
+        single_to_combined_conversion = single_to_combined_conversion,
+        pre_multiplied_combined_tbf = pre_multiplied_combined_tbf)
+    )
   }
 
 
 preprocessed_tbf = preprocessTbf_(transition_model = model$transition_model, params = params)
 
+softmax = function(x){
+  res = exp(c(0, x))
+  res = res/sum(res)
+  res
+}
+normalize = function(x){x / sum(x)}
+
+
 forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, grad = F){
 
-  logalpha_dimnames = c("val")
-  if(grad){
-    logalpha_dimnames = c(logalpha_dimnames, outer(row.names(params$emission_params), colnames(params$emission_params), function(x, y)(paste("Emission", x, y, sep=  "_"))))
-    tr_params_grad = lapply(params$transition_params, function(x)lapply(x, function(y)outer(colnames(y), seq(nrow(y)), paste, sep = "_")))
-    tr_params_grad = lapply(tr_params_grad, function(x)mapply(paste, names(x), x, sep = "_"))
-    tr_params_grad = mapply(paste, names(tr_params_grad), tr_params_grad, sep = "_")
-  }
-  logalpha = array(0, c(max(preprocessed_tbf$semi_markov_depths_per_state), 1, model$transition_model$dont_touch$n_latent_states))
+  # filtering probabilities
+  logalpha = lapply(
+    model$transition_model$dont_touch$latent_states_names,
+    function(state_name)unname(rep(log(1/(model$transition_model$dont_touch$n_latent_states * preprocessed_tbf$semi_markov_depths_per_state[state_name])), preprocessed_tbf$semi_markov_depths_per_state[state_name])))
+  names(logalpha) = model$transition_model$dont_touch$latent_states_names
+  # sum(exp(unlist(logalpha)))
 
-  dimnames(logalpha) = list(NULL, NULL, model$transition_model$dont_touch$latent_states_names)
+  for(i in seq(2, length(data_seq$emissions))){
+    # transition ####
+    probs_from_exit = rep(0, model$transition_model$dont_touch$n_latent_states); names(probs_from_exit) = model$transition_model$dont_touch$latent_states_names
+    for(state_name in preprocessed_tbf$non_absorbing_states){
+      depth = preprocessed_tbf$semi_markov_depths_per_state[[state_name]]
+      outstates = preprocessed_tbf$exit_states[[state_name]]
+      value_at_node = matrix(
+        apply(
+        preprocessed_tbf$pre_multiplied_combined_tbf[[state_name]], c(3),
+        function(slice) {
+          slice %*% data_seq$explanatory_variables_transition[i-1,preprocessed_tbf$active_explanatory_variables_per_state[[state_name]]]
+          }),
+        ncol  = preprocessed_tbf$n_exit_states[[state_name]])
+      row.names(value_at_node) = dimnames(preprocessed_tbf$pre_multiplied_combined_tbf[[state_name]])[[1]]
+      colnames(value_at_node) = outstates
+      # updating filtering probabilities at semi-Markov depth
+      tonic = softmax(value_at_node[nrow(value_at_node),])
+      probs_from_exit[outstates] = probs_from_exit[outstates] + exp(logalpha[[state_name]][depth]) * tonic[-1]
+      logalpha[[state_name]][depth] = logalpha[[state_name]][depth] + log(tonic[1])
+      # if depth > 0, make probability trickle down
+      if(depth>1){
+        next_node_idx = nrow(value_at_node)
+        for(i in seq(depth, 2)){
+            if(i == preprocessed_tbf$combined_tbf_per_state[[state_name]][next_node_idx]){
+              print(tonic)
+              next_node_idx = next_node_idx - 1
+              tonic = next_tonic
+              next_tonic = softmax(value_at_node[next_node_idx,])
+              delta_tonic = next_tonic / tonic
+              print(tonic)
+              print(" ")
+            }
+          tonic = normalize(tonic * delta_tonic)
+        }
+      }
+    }
+    # updating filtering probabilities at depth = 1
+    for(state_name in model$transition_model$dont_touch$latent_states_names){
+      logalpha[state_name] = logalpha[state_name] + log(probs_from_exit[state_name])
+    }
 
-  for(i in seq(length(data_seq$emissions))){
-    print(i)
+    # emission ####
+    ###############
+    for(state_name in transition_model$dont_touch$latent_states_names){
+    }
   }
-  preprocessed_tbf
 }
 
 

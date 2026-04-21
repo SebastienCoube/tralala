@@ -226,5 +226,6 @@ data_list = addEmissionsInDataList(
 data_seq = data_list[[1]]
 
 par(mfrow = c(2, 1))
+par(mar = c(2,4,1,1))
 plotLatentState(data_seq$latent_states$latent_state, model)
-plot(seq(length(data_seq$emissions)), sapply(data_seq$emissions, function(x)x["body_temp"]))
+plot(seq(length(data_seq$emissions)), sapply(data_seq$emissions, function(x)x["body_temp"]), ylab = "body temperature")

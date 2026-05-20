@@ -137,15 +137,16 @@ tent_matrix <- function(knots, eval_points) {
   }
 
 
-preprocessed_tbf = preprocessTbf_(transition_model = model$transition_model, params = params)
 
 softmax = function(x){
-  res = exp(c(0, x))
+  res = c(1, exp(x))
   res = res/sum(res)
   res
 }
 normalize = function(x){x / sum(x)}
 
+
+preprocessed_tbf = preprocessTbf_(transition_model = model$transition_model, params = params)
 
 forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, grad = F){
 
@@ -172,24 +173,28 @@ forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, g
       row.names(value_at_node) = dimnames(preprocessed_tbf$pre_multiplied_combined_tbf[[state_name]])[[1]]
       colnames(value_at_node) = outstates
       # updating filtering probabilities at semi-Markov depth
-      tonic = softmax(value_at_node[nrow(value_at_node),])
-      probs_from_exit[outstates] = probs_from_exit[outstates] + exp(logalpha[[state_name]][depth]) * tonic[-1]
-      logalpha[[state_name]][depth] = logalpha[[state_name]][depth] + log(tonic[1])
+      #probs_from_exit[outstates] = probs_from_exit[outstates] + exp(logalpha[[state_name]][depth]) * tonic[-1]
+      #logalpha[[state_name]][depth] = logalpha[[state_name]][depth] + log(tonic[1])
       # if depth > 0, make probability trickle down
-      if(depth>1){
-        next_node_idx = nrow(value_at_node)
-        for(i in seq(depth, 2)){
-            if(i == preprocessed_tbf$combined_tbf_per_state[[state_name]][next_node_idx]){
-              print(tonic)
-              next_node_idx = next_node_idx - 1
-              tonic = next_tonic
-              next_tonic = softmax(value_at_node[next_node_idx,])
-              delta_tonic = next_tonic / tonic
-              print(tonic)
-              print(" ")
-            }
-          tonic = normalize(tonic * delta_tonic)
+      tonic = softmax(value_at_node[nrow(value_at_node),])
+      next_node_idx = nrow(value_at_node)
+      next_tonic = tonic
+
+      for(u in seq(depth, 1)){
+        probs_from_exit[outstates] = probs_from_exit[outstates] + exp(logalpha[[state_name]][depth]) * tonic[-1]
+        logalpha[[state_name]][depth] = logalpha[[state_name]][depth] + log(tonic[1])
+
+        if(u>1 & u == preprocessed_tbf$combined_tbf_per_state[[state_name]][next_node_idx]){
+          next_node_idx = next_node_idx - 1
+          tonic = next_tonic
+          next_tonic = softmax(value_at_node[next_node_idx,])
+          delta_tonic = (next_tonic / tonic)^(1 / )
+          print(" ")
         }
+
+        print(paste("u = ", u, " next_node_idx = ", next_node_idx, " next node = ", preprocessed_tbf$combined_tbf_per_state[[state_name]][next_node_idx]))
+        print(" ")
+        tonic = normalize(tonic * delta_tonic)
       }
     }
     # updating filtering probabilities at depth = 1

@@ -1,15 +1,5 @@
 source("R/initialize_model.R")
 
-# creating list of temporal basis functions
-temporal_basis_function_list = list(
-  "simple_tbf" = makeTbf(),
-  "complicated_tbf" = makeTbf(breakpoints = 2^seq(1, 8)),
-  "other_complicated_tbf" = makeTbf(breakpoints = 2^seq(1, 8) + 10)
-)
-# plotting tbflist
-plotTbf(temporal_basis_function_list$simple_tbf, log.x = F)
-plotTbf(temporal_basis_function_list$complicated_tbf, log.x = F)
-plotTbf(temporal_basis_function_list$complicated_tbf, log.x = T)
 
 # initializing transition model
 
@@ -36,8 +26,6 @@ model = beginModel(
   latent_states_names = c("S", "I", "R", "D"),
   # observations
   data_list = data_list,
-  # temporal basis functions
-  temporal_basis_function_list = temporal_basis_function_list,
   # emission parameters whose value is fixed by the user
   fixed_emission_param_names = c("pcr_prob", "sero_prob", "death_prob"),
   # emission parameters whose value is estimated by the model
@@ -104,22 +92,38 @@ model = beginModel(
 
 # Looking at possible transitions
 plotTransitionGraph(model)
+
+transition_model = model$transition_model
+emission_model = model$emission_model
+data_seq = data_list[[1]]
+
 # Modifying possible transitions
-model$transition_model$to_specify$possible_transitions["S","R"]=0
-model$transition_model$to_specify$possible_transitions["I","S"]=0
-model$transition_model$to_specify$possible_transitions["R","I"]=0
-model$transition_model$to_specify$possible_transitions["D",c("S", "I", "R")]=0
+model$transition_model$to_specify$possible_transitions["S","R"]=FALSE
+model$transition_model$to_specify$possible_transitions["I","S"]=FALSE
+model$transition_model$to_specify$possible_transitions["R","I"]=FALSE
+model$transition_model$to_specify$possible_transitions["D",c("S", "I", "R")]=FALSE
 print(model$transition_model$to_specify$possible_transitions)
 # Looking at possible transitions
 plotTransitionGraph(model)
+#
+## Modifying variable basis interaction table
+print(model$transition_model$to_specify$BTF_per_state)
+model$transition_model$to_specify$BTF_per_state$I = makeBTF(c(5, 10, 15))
+model$transition_model$to_specify$BTF_per_state$R = makeBTF(c(50, 100, 150))
 
-# Modifying variable basis interaction table
-print(model$transition_model$to_specify$variable_basis_interactions)
-model$transition_model$to_specify$variable_basis_interactions[c("I", "R"),"day_temperature"] = NA
-model$transition_model$to_specify$variable_basis_interactions[c("I", "R"),"Intercept"] = "complicated_tbf"
-model$transition_model$to_specify$variable_basis_interactions[c("I"),"day_temperature"] = "other_complicated_tbf"
-model$transition_model$to_specify$variable_basis_interactions["S",] = "simple_tbf"
-print(model$transition_model$to_specify$variable_basis_interactions)
+checkBTF(
+  names_vec = model$transition_model$dont_touch$latent_states_names,
+  lst = model$transition_model$to_specify$BTF_per_state)
+
+
+model$transition_model$to_specify$covariate_effect_per_state$I["Intercept",] =       c(F,T,F)
+model$transition_model$to_specify$covariate_effect_per_state$I["day_temperature",] = c(F,T,F)
+model$transition_model$to_specify$covariate_effect_per_state$I["Intercept",] =       c(F,F,T)
+model$transition_model$to_specify$covariate_effect_per_state$I["day_temperature",] = c(T,F,F)
+model$transition_model$to_specify$covariate_effect_per_state$R["Intercept",] =       c(F,F,T)
+model$transition_model$to_specify$covariate_effect_per_state$R["day_temperature",] = c(T,F,F)
+model$transition_model$to_specify$covariate_effect_per_state$D["Intercept",] =       c(F,F,F)
+model$transition_model$to_specify$covariate_effect_per_state$D["day_temperature",] = c(F,F,F)
 
 # Fixing parameters for the emission distribution
 model$emission_model$to_specify$fixed_emission_params["pcr_prob", "S"] = 0
@@ -140,9 +144,7 @@ model$emission_model$to_specify$fixed_emission_params["death_prob", "D"] = 1
 
 ########################################
 
-transition_model = model$transition_model
-emission_model = model$emission_model
-data_seq = data_list[[1]]
+
 
 
 

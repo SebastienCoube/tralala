@@ -42,7 +42,7 @@ checkEmissionLogPrior = function(f, name){
 }
 
 beginEmissionModel = function(
-    data_list,
+    nvar,
     latent_states_names,
     fixed_emission_param_names,
     estimated_emission_param_names,
@@ -56,7 +56,6 @@ beginEmissionModel = function(
   # Checking the function provided for the emission log-likelihood
   checkEmissionLogLikelihood(emission_log_likelihood, "emission_log_likelihood")
   # messaging
-  nvar = ncol(data_list[[1]]$explanatory_variables_emission)
   if(is.null(nvar))nvar = 0
   nfixed = length(fixed_emission_param_names)
   if(is.null(nfixed))nfixed = 0
@@ -81,11 +80,6 @@ beginEmissionModel = function(
       }
       return(res)
     }
-  }
-  checkEmissionLogLikelihood(emission_log_likelihood_grad, "emission_log_likelihood_grad")
-  if(verbose){
-    message("emission_log_likelihood_grad checked succesfully")
-    message("----------")
   }
 
   # Checking the function provided for the emission prior
@@ -117,57 +111,23 @@ beginEmissionModel = function(
   res$dont_touch$log_prior = emission_log_prior
   res$dont_touch$log_prior_grad = emission_log_prior_grad
   res$dont_touch$estimated_emission_param_names = estimated_emission_param_names
+  res$dont_touch$fixed_emission_param_names = fixed_emission_param_names
   # creating matrix of fixed emission params at the right format. To be filled by the user
   if(!is.null(estimated_emission_param_names)){
     res$to_specify = list()
     fixed_emission_params = matrix(NA, length(fixed_emission_param_names), length(latent_states_names))
     row.names(fixed_emission_params) = fixed_emission_param_names
     colnames(fixed_emission_params) =  latent_states_names
-    message(paste("Matrix of", length(fixed_emission_param_names), "x", length(latent_states_names),  "fixed emission parameters created.
-  - Filled with NAs
-  - You must fill it by hand with the desired parameters"))
     res$to_specify$fixed_emission_params = fixed_emission_params
   }
   return(res)
 }
 
-#groups = list(c("S", "R"), "D", "I")
-#x = rnorm(4)
-#names(x) = c("S", "I", "R", "D")
-#mar_var = c(1,1,1)
-#mean = rep(0, 3)
-#DMVNGroup(x, mean, mar_var, groups)
 
-DMVNGroup = function(
-    x,
-    mean,
-    mar_var,
-    groups
-){
-  if(length(mean)!=length(groups))stop("groups and mean must have the same length")
-  if(length(mar_var)!=length(groups))stop("groups and mar_var must have the same length")
-  if(!is.list(groups))stop("groups must be a list")
-  if(any(is.na(match(do.call(c, groups), names(x)))))stop("The groups and the names in x do not match")
-  if(any(is.na(match(names(x), do.call(c, groups)))))stop("The groups and the names in x do not match")
-  if(any(mar_var<0))stop("mar_var must be positive")
-  meanvec = x
-  Sig = matrix(0, length(x), length(x)); row.names(Sig) = names(x); colnames(Sig) = names(x)
-  for(i in seq(length(groups))){
-    meanvec[groups[[i]]] = mean[i]
-    Sig[groups[[i]], groups[[i]]] = mar_var[i]*.99
-    Sig[cbind(groups[[i]], groups[[i]])] = mar_var[i]
-  }
-  return(-.5 * sum(((x - meanvec) %*% solve(Sig)) * (x - meanvec)))
+checkFixedEmissionParams = function(fixed_emission_params, fixed_emission_params_names, latent_states_names){
+  if(!is.matrix(fixed_emission_params))                                   stop("<your model>$emission_model$to_specify$fixed_emission_params must be a matrix")
+  if(!all(colnames (fixed_emission_params) == latent_states_names))        stop(paste("The column names of <your model>$emission_model$to_specify$fixed_emission_params must be:", latent_states_names))
+  if(!all(row.names(fixed_emission_params) == fixed_emission_params_names))stop(paste("The row names of <your model>$emission_model$to_specify$fixed_emission_params must be:", fixed_emission_params_names))
+  if(!is.numeric(fixed_emission_params))                                   stop("<your model>$emission_model$to_specify$fixed_emission_params must be numeric")
 }
-
-#'plot(seq(-20, 20), softPlus(seq(-20, 20)))
-#'abline(a=0, b=1)
-#'abline(h=0)
-softPlus = function(x) log(1 + exp(x))
-
-#'plot(seq(-20, 20), softPlusSquare(seq(-20, 20)))
-#'abline(a=0, b=1)
-#'abline(h=0)
-softPlusSquare = function(x) log(1 + exp(x))^2
-
 

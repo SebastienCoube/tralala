@@ -1,4 +1,7 @@
 source("R/initialize_model.R")
+source("R/check_data.R")
+source("R/transition_model.R")
+source("R/emission_model.R")
 
 
 # initializing transition model
@@ -20,8 +23,8 @@ data_list = list(
 
 plot(data_list$individual_1$explanatory_variables_transition[,2])
 
-# initializing model
-model = beginModel(
+# First step of model
+model = initializeModelStep1(
   # names of the latent states
   latent_states_names = c("S", "I", "R", "D"),
   # observations
@@ -87,15 +90,7 @@ model = beginModel(
 
 
 
-
-
-
-# Looking at possible transitions
-plotTransitionGraph(model)
-
-transition_model = model$transition_model
-emission_model = model$emission_model
-data_seq = data_list[[1]]
+# Second step of model
 
 # Modifying possible transitions
 model$transition_model$to_specify$possible_transitions["S","R"]=FALSE
@@ -103,48 +98,29 @@ model$transition_model$to_specify$possible_transitions["I","S"]=FALSE
 model$transition_model$to_specify$possible_transitions["R","I"]=FALSE
 model$transition_model$to_specify$possible_transitions["D",c("S", "I", "R")]=FALSE
 print(model$transition_model$to_specify$possible_transitions)
-# Looking at possible transitions
 plotTransitionGraph(model)
-#
+
 ## Modifying variable basis interaction table
 print(model$transition_model$to_specify$BTF_per_state)
 model$transition_model$to_specify$BTF_per_state$I = makeBTF(c(5, 10, 15))
 model$transition_model$to_specify$BTF_per_state$R = makeBTF(c(50, 100, 150))
 
-checkBTF(
-  names_vec = model$transition_model$dont_touch$latent_states_names,
-  lst = model$transition_model$to_specify$BTF_per_state)
-
-
-model$transition_model$to_specify$covariate_effect_per_state$I["Intercept",] =       c(F,T,F)
-model$transition_model$to_specify$covariate_effect_per_state$I["day_temperature",] = c(F,T,F)
-model$transition_model$to_specify$covariate_effect_per_state$I["Intercept",] =       c(F,F,T)
-model$transition_model$to_specify$covariate_effect_per_state$I["day_temperature",] = c(T,F,F)
-model$transition_model$to_specify$covariate_effect_per_state$R["Intercept",] =       c(F,F,T)
-model$transition_model$to_specify$covariate_effect_per_state$R["day_temperature",] = c(T,F,F)
-model$transition_model$to_specify$covariate_effect_per_state$D["Intercept",] =       c(F,F,F)
-model$transition_model$to_specify$covariate_effect_per_state$D["day_temperature",] = c(F,F,F)
-
 # Fixing parameters for the emission distribution
-model$emission_model$to_specify$fixed_emission_params["pcr_prob", "S"] = 0
-model$emission_model$to_specify$fixed_emission_params["pcr_prob", "I"] = 1
-model$emission_model$to_specify$fixed_emission_params["pcr_prob", "R"] = 0
-model$emission_model$to_specify$fixed_emission_params["pcr_prob", "D"] = 0
-
-model$emission_model$to_specify$fixed_emission_params["sero_prob", "S"] = 0
-model$emission_model$to_specify$fixed_emission_params["sero_prob", "I"] = 0
-model$emission_model$to_specify$fixed_emission_params["sero_prob", "R"] = 1
-model$emission_model$to_specify$fixed_emission_params["sero_prob", "D"] = 0
-
-model$emission_model$to_specify$fixed_emission_params["death_prob", "S"] = 0
-model$emission_model$to_specify$fixed_emission_params["death_prob", "I"] = 0
-model$emission_model$to_specify$fixed_emission_params["death_prob", "R"] = 0
-model$emission_model$to_specify$fixed_emission_params["death_prob", "D"] = 1
+model$emission_model$to_specify$fixed_emission_params["pcr_prob", c("S","I", "R", "D")] = c(0,1,0,0)
+model$emission_model$to_specify$fixed_emission_params["sero_prob", c("S","I", "R", "D")] = c(0,1,1,0)
+model$emission_model$to_specify$fixed_emission_params["death_prob", c("S","I", "R", "D")] = c(0,0,0,1)
 
 
-########################################
+model = initializeModelStep2(model)
 
+# Third step
 
+model$transition_model$to_specify$explanatory_variables_effects$S[,"simple effect"]=T
+model$transition_model$to_specify$explanatory_variables_effects$I["Intercept","BTF interaction"]=T
+model$transition_model$to_specify$explanatory_variables_effects$I["day_temperature","no effect"]=T
+model$transition_model$to_specify$explanatory_variables_effects$R["Intercept","BTF interaction"]=T
+model$transition_model$to_specify$explanatory_variables_effects$R["day_temperature","no effect"]=T
+model = initializeModelStep3(model)
 
 
 

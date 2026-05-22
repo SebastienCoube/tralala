@@ -23,13 +23,11 @@ beginTransitionModel = function(
     }
   )
   names(covariate_effect_per_state) = latent_states_names
-
   return(list(
     to_specify =
       list(
         "possible_transitions" = possible_transitions,
-        "BTF_per_state" = BTF_per_state,
-        "covariate_effect_per_state" = covariate_effect_per_state
+        "BTF_per_state" = BTF_per_state
       ),
     dont_touch =
       list(
@@ -95,20 +93,21 @@ plotBTF = function(BTF, log.x = T){
 # colnames(transition_mat) = NULL
 # checkTransitionMat(transition_mat, latent_states_names)
 
-checkTransitionMat <- function(transition_mat, latent_states_names){
-
+checkTransitionMat <- function(transition_model){
+  latent_states_names = transition_model$dont_touch$latent_states_names
+  transition_mat = transition_model$to_specify$possible_transitions
   n <- length(latent_states_names)
 
   if (nrow(transition_mat) != n || ncol(transition_mat) != n) {
     stop(sprintf(
-      "transition_mat must be a %dx%d matrix (one row and column per latent state), but found %dx%d.",
+      "<your model>$transition_model$to_specify$possible_transitions must be a %dx%d matrix (one row and column per latent state), but found %dx%d.",
       n, n, nrow(transition_mat), ncol(transition_mat)
     ))
   }
 
   if (!identical(rownames(transition_mat), latent_states_names)) {
     stop(sprintf(
-      "transition_mat row names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
+      "<your model>$transition_model$to_specify$possible_transitions row names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
       paste(latent_states_names,      collapse = ", "),
       paste(rownames(transition_mat), collapse = ", ")
     ))
@@ -116,81 +115,14 @@ checkTransitionMat <- function(transition_mat, latent_states_names){
 
   if (!identical(colnames(transition_mat), latent_states_names)) {
     stop(sprintf(
-      "transition_mat column names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
+      "<your model>$transition_model$to_specify$possible_transitions column names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
       paste(latent_states_names,      collapse = ", "),
       paste(colnames(transition_mat), collapse = ", ")
     ))
   }
 
-  if (!is.logical(transition_mat)) stop("transition_model$to_specify$possible_transitions must be logical")
-  if (any(!diag(transition_mat)))  stop("the diagonal of transition_model$to_specify$possible_transitions must be all TRUE")
-}
-
-# transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
-# checkCovariateEffectPerState(
-#   latent_states_names = transition_model$dont_touch$latent_states_names,
-#   explanatory_variable_names = transition_model$dont_touch$explanatory_variable_names,
-#   effectPerStateList = transition_model$to_specify$covariate_effect_per_state)
-# names(transition_model$to_specify$covariate_effect_per_state)[[1]]="q"
-# checkCovariateEffectPerState(
-#   latent_states_names = transition_model$dont_touch$latent_states_names,
-#   explanatory_variable_names = transition_model$dont_touch$explanatory_variable_names,
-#   effectPerStateList = transition_model$to_specify$covariate_effect_per_state)
-# transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
-# transition_model$to_specify$covariate_effect_per_state[[1]][,1]=T
-# checkCovariateEffectPerState(
-#   latent_states_names = transition_model$dont_touch$latent_states_names,
-#   explanatory_variable_names = transition_model$dont_touch$explanatory_variable_names,
-#   effectPerStateList = transition_model$to_specify$covariate_effect_per_state)
-# transition_model$to_specify$covariate_effect_per_state[[1]][,1]=T
-# transition_model$to_specify$covariate_effect_per_state[[1]][,2]=F
-# checkCovariateEffectPerState(
-#   latent_states_names = transition_model$dont_touch$latent_states_names,
-#   explanatory_variable_names = transition_model$dont_touch$explanatory_variable_names,
-#   effectPerStateList = transition_model$to_specify$covariate_effect_per_state)
-
-checkCovariateEffectPerState = function(effectPerStateList, explanatory_variable_names, latent_states_names) {
-  if (!identical(names(effectPerStateList), latent_states_names)) {
-    stop(sprintf(
-      "Error while checking transition_model$to_specify$covariate_effect_per_state: list names do not match the expected ones.\n  Expected: %s\n  Found:    %s",
-      paste(latent_states_names, collapse = ", "),
-      paste(names(effectPerStateList),     collapse = ", ")
-    ))
-  }
-
-  for (list_name in names(effectPerStateList)) {
-    mat <- effectPerStateList[[list_name]]
-
-    if (ncol(mat) != 3) {
-      stop(sprintf(
-        "Error while checking transition_model$to_specify$covariate_effect_per_state: element '%s' does not have exactly 3 columns (found %d).",
-        list_name, ncol(mat)
-      ))
-    }
-
-    if (!identical(rownames(mat), explanatory_variable_names)) {
-      stop(sprintf(
-        "Error while checking transition_model$to_specify$covariate_effect_per_state: element '%s': row names do not match the expected ones.\n  Expected: %s\n  Found:    %s",
-        list_name,
-        paste(explanatory_variable_names, collapse = ", "),
-        paste(rownames(mat),     collapse = ", ")
-      ))
-    }
-
-    for (row_name in rownames(mat)) {
-      row_vals <- mat[row_name, ]
-      n_true   <- sum(row_vals == TRUE)
-      n_false  <- sum(row_vals == FALSE)
-
-      if (n_true != 1L || n_false != 2L) {
-        stop(sprintf(
-          "Error while checking transition_model$to_specify$covariate_effect_per_state: element '%s', row '%s': expected exactly one TRUE and two FALSE, but found %d TRUE and %d FALSE.",
-          list_name, row_name, n_true, n_false
-        ))
-      }
-    }
-  }
-  invisible(TRUE)
+  if (!is.logical(transition_mat)) stop("<your model>$transition_model$to_specify$possible_transitions must be logical")
+  if (any(!diag(transition_mat)))  stop("the diagonal of <your model>$transition_model$to_specify$possible_transitions must be all TRUE")
 }
 
 
@@ -199,17 +131,19 @@ checkCovariateEffectPerState = function(effectPerStateList, explanatory_variable
 # transition_model$to_specify$BTF_per_state$I = makeBTF(c(3,100))
 # checkBTF(transition_model$dont_touch$latent_states_names, transition_model$to_specify$BTF_per_state)
 
-checkBTF <- function(latent_states_names, BTF_list) {
+checkBTF <- function(transition_model) {
+  latent_states_names = transition_model$dont_touch$latent_states_names
+  BTF_list = transition_model$to_specify$BTF_per_state
   # Check 1: names of the list match the character vector
   list_names <- names(BTF_list)
 
   if (is.null(list_names)) {
-    stop("model$transition_model$to_specify$BTF_per_state has no names.")
+    stop("<your model>$transition_model$to_specify$BTF_per_state has no names.")
   }
 
   if (!identical(sort(list_names), sort(latent_states_names))) {
     stop(sprintf(
-      "model$transition_model$to_specify$BTF_per_state latent states names do not match the expected latent states names.\n  Expected: %s\n  Got:      %s",
+      "<your model>$transition_model$to_specify$BTF_per_state latent states names do not match the expected latent states names.\n  Expected: %s\n  Got:      %s",
       paste(sort(latent_states_names), collapse = ", "),
       paste(sort(list_names), collapse = ", ")
     ))
@@ -224,153 +158,125 @@ checkBTF <- function(latent_states_names, BTF_list) {
 
     # Must be numeric / integer
     if (!is.numeric(x) && !is.integer(x)) {
-      stop(sprintf("model$transition_model$to_specify$BTF_per_state element '%s' is not numeric.", nm))
+      stop(sprintf("<your model>$transition_model$to_specify$BTF_per_state element '%s' is not numeric.", nm))
     }
 
     # Must contain only whole numbers
     if (!all(x == floor(x))) {
-      stop(sprintf("model$transition_model$to_specify$BTF_per_state element '%s' contains non-integer values.", nm))
+      stop(sprintf("<your model>$transition_model$to_specify$BTF_per_state element '%s' contains non-integer values.", nm))
     }
 
     # All values must be greater than 1
     if (!all(x > 1)) {
       stop(sprintf(
-        "model$transition_model$to_specify$BTF_per_state element '%s' contains values <= 1: %s",
+        "<your model>$transition_model$to_specify$BTF_per_state element '%s' contains values <= 1: %s",
         nm, paste(x[x <= 1], collapse = ", ")
       ))
     }
 
     # Must be strictly increasing
     if (length(x) > 1 && !all(diff(x) > 0)) {
-      stop(sprintf("model$transition_model$to_specify$BTF_per_state element '%s' is not strictly increasing.", nm))
+      stop(sprintf("<your model>$transition_model$to_specify$BTF_per_state element '%s' is not strictly increasing.", nm))
     }
   }
 
   invisible(TRUE)
 }
+
 
 # transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
-# transition_model$to_specify$BTF_per_state$I = makeBTF(c(10, 100))
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
-# transition_model$to_specify$covariate_effect_per_state$I[1,] = c(F,F,T)
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
-# transition_model$to_specify$covariate_effect_per_state$S[,2] = F
-# transition_model$to_specify$covariate_effect_per_state$S[,1] = T
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
-# transition_model$to_specify$covariate_effect_per_state$S[1,] = c(F,T,F)
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
+# transition_model$to_specify$BTF_per_state$I = makeBTF(c(10, 20))
+# transition_model$to_specify$BTF_per_state$R = makeBTF(c(100, 200))
+# transition_model$to_specify$possible_transitions["S",] = c(T,T,F,T)
+# transition_model$to_specify$possible_transitions["I",] = c(F,T,T,T)
+# transition_model$to_specify$possible_transitions["R",] = c(T,F,T,T)
 # transition_model$to_specify$possible_transitions["D",] = c(F,F,F,T)
-# checkTransitionModelCoherence(
-#   BTF_per_state = transition_model$to_specify$BTF_per_state,
-#   covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-#   transition_mat = transition_model$to_specify$possible_transitions,
-#   latent_states_names =  transition_model$dont_touch$latent_states_names
-# )
+# continueTransitionModel(transition_model)
 
+continueTransitionModel = function(transition_model){
+  checkBTF(transition_model)
+  checkTransitionMat(transition_model)
+  transition_model$dont_touch = c(transition_model$dont_touch, transition_model$to_specify)
+  transition_model$to_specify = NULL
+  transition_model$to_specify = list(
+    transition_effects =
+      lapply(
+        transition_model$dont_touch$latent_states_names,
+        function(name){
+          if(sum(transition_model$dont_touch$possible_transitions[name,])==1)return(NULL)
+          if(is.null(transition_model$dont_touch$BTF_per_state[[name]])){
+            out = matrix(FALSE, length(transition_model$dont_touch$explanatory_variable_names), 2)
+            row.names(out) = transition_model$dont_touch$explanatory_variable_names
+            colnames(out) = c("no effect", "simple effect")
+            out[,2] = T
+            return(out)
+          }
+          if(!is.null(transition_model$dont_touch$BTF_per_state[[name]])){
+            out = matrix(FALSE, length(transition_model$dont_touch$explanatory_variable_names), 3)
+            row.names(out) = transition_model$dont_touch$explanatory_variable_names
+            colnames(out) = c("no effect", "simple effect","BTF interaction")
+            out[,3] = T
+            return(out)
+          }
+        })
+  )
+  transition_model
+}
 
-checkTransitionModelCoherence <- function(latent_states_names, transition_mat, covariate_effect_per_state, BTF_per_state) {
-  for (state in latent_states_names) {
-    row     <- transition_mat[state, ]
-    cov_mat <- covariate_effect_per_state[[state]]
-    btf_vec <- BTF_per_state[[state]]
+plotTransitionGraph = function(model){
+  g = model$transition_model$to_specify$possible_transitions
+  diag(g) = 0
+  g = igraph::graph_from_adjacency_matrix(g)
+  plot(g)
+}
 
-    # Case 1: only the diagonal is TRUE in the transition row
-    if (sum(row) == 1 && row[state]) {
-
-      # All columns except the first must be FALSE
-      if (ncol(cov_mat) > 1 && any(cov_mat[, -1, drop = FALSE])) {
-        stop(sprintf(
-          "State '%s': only the diagonal of transition_mat is TRUE, so only the first column of covariate_effect_per_state can be TRUE.",
-          state
-        ))
+createExplanatoryVariablesEffects = function(transition_model){
+  transition_model$dont_touch = c(transition_model$dont_touch, transition_model$to_specify)
+  transition_model$to_specify = list()
+  transition_model$to_specify$explanatory_variables_effects = lapply(
+      transition_model$dont_touch$latent_states_names, function(latent_states_name){
+        if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1)return(NULL)
+        if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
+          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 2)
+          row.names(res) = transition_model$dont_touch$explanatory_variable_names
+          colnames(res) =  c("no effect", "simple effect")
+          return(res)
+        }
+        if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
+          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 3)
+          row.names(res) = transition_model$dont_touch$explanatory_variable_names
+          colnames(res) =  c("no effect", "simple effect", "BTF interaction")
+          return(res)
+        }
       }
+    )
+  names(transition_model$to_specify$explanatory_variables_effects) = transition_model$dont_touch$latent_states_names
+  return(transition_model)
+}
 
-      # BTF element must be NULL
-      if (!is.null(btf_vec)) {
-        stop(sprintf(
-          "State '%s': only the diagonal of transition_mat is TRUE, so the corresponding element of BTF_per_state must be NULL.",
-          state
-        ))
+
+checkExplanatoryVariablesEffects = function(transition_model){
+  lapply(
+    transition_model$dont_touch$latent_states_names, function(latent_states_name){
+      if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1){
+        if(!is.null(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be null"))
+        return(invisible())
       }
+      if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
+        if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
+        if(!any(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]][,2]))stop(paste("The 'simple effect' column of <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at least one TRUE slot"))
+        if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)!=1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have exactly one TRUE per row"))
 
-      # Cases 2 & 3: more than the diagonal is TRUE in the transition row
-    } else if (sum(row) > 1) {
-
-      # Case 2: BTF element is NULL
-      if (is.null(btf_vec)) {
-
-        # Third column and beyond must be FALSE
-        if (ncol(cov_mat) > 2 && any(cov_mat[, -(1:2), drop = FALSE])) {
-          stop(sprintf(
-            "State '%s': transition_mat has multiple TRUE entries and BTF_per_state is NULL, so the third column and beyond of covariate_effect_per_state must be FALSE.",
-            state
-          ))
-        }
-
-        # Second column must have at least one TRUE
-        if (ncol(cov_mat) < 2 || !any(cov_mat[, 2])) {
-          stop(sprintf(
-            "State '%s': transition_mat has multiple TRUE entries and BTF_per_state is NULL, so the second column of covariate_effect_per_state must have at least one TRUE.",
-            state
-          ))
-        }
-
-        # Case 3: BTF element is not NULL
-      } else {
-
-        # All columns of covariate_effect_per_state are allowed — no column restriction
-
-        # Third column must have at least one TRUE
-        if (ncol(cov_mat) < 3 || !any(cov_mat[, 3])) {
-          stop(sprintf(
-            "State '%s': transition_mat has multiple TRUE entries and BTF_per_state is not NULL, so the third column of covariate_effect_per_state must have at least one TRUE.",
-            state
-          ))
-        }
+        return(invisible())
+      }
+      if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
+        if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
+        if(!any(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]][,3]))stop(paste("The 'BTF interaction' column of <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at least one TRUE slot"))
+        if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)!=1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have exactly one TRUE per row"))
+        return(invisible())
       }
     }
-  }
-
-  invisible(TRUE)
-}
-
-checkTransitionModel = function(transition_model){
-  checkBTF(transition_model$dont_touch$latent_states_names, transition_model$to_specify$BTF_per_state)
-  checkTransitionMat(transition_mat, latent_states_names)
-  checkCovariateEffectPerState(
-    latent_states_names = transition_model$dont_touch$latent_states_names,
-    explanatory_variable_names = transition_model$dont_touch$explanatory_variable_names,
-    effectPerStateList = transition_model$to_specify$covariate_effect_per_state)
-  checkTransitionModelCoherence(
-    BTF_per_state = transition_model$to_specify$BTF_per_state,
-    covariate_effect_per_state = transition_model$to_specify$covariate_effect_per_state,
-    transition_mat = transition_model$to_specify$possible_transitions,
-    latent_states_names =  transition_model$dont_touch$latent_states_names
   )
+  return(invisible())
 }
+

@@ -1,38 +1,51 @@
-beginModel = function(
+initializeModelStep1 = function(
     latent_states_names,
     data_list,
     fixed_emission_param_names,
     estimated_emission_param_names,
-    emission_log_likelihood,  emission_log_likelihood_grad = NULL,
+    emission_log_likelihood,
     emission_log_prior
-
 ){
   res = list()
   # check data
   checkDataList(data_list)
   # transition model
   res$transition_model = beginTransitionModel(
-    data_list = data_list,
+    explanatory_variable_names = colnames(data_list[[1]]$explanatory_variables_transition),
     latent_states_names = latent_states_names)
   # emission model
   res$emission_model = beginEmissionModel(
-    data_list,
+    nvar = ncol(data_list[[1]]$explanatory_variables_emission),
     latent_states_names = latent_states_names,
     fixed_emission_param_names = fixed_emission_param_names,
     estimated_emission_param_names = estimated_emission_param_names,
-    emission_log_likelihood = emission_log_likelihood,  emission_log_likelihood_grad = emission_log_likelihood_grad,
+    emission_log_likelihood = emission_log_likelihood,
     emission_log_prior = emission_log_prior
   )
   res$data_list = data_list
   res
 }
 
+initializeModelStep2 = function(model){
+  checkFixedEmissionParams(
+    latent_states_names = model$transition_model$dont_touch$latent_states_names,
+    fixed_emission_params_names = model$emission_model$dont_touch$fixed_emission_param_names,
+    fixed_emission_params = model$emission_model$to_specify$fixed_emission_params)
+  model$emission_model = c(model$emission_model$dont_touch, model$emission_model$to_specify)
+  checkTransitionMat(model$transition_model)
+  checkBTF(model$transition_model)
+  model$transition_model = createExplanatoryVariablesEffects(model$transition_model)
+  return(model)
+}
 
-
+initializeModelStep3 = function(model){
+  checkExplanatoryVariablesEffects(model$transition_model)
+  model$transition_model = c(model$transition_model$dont_touch, model$transition_model$to_specify)
+  return(model)
+}
 
 # Creates transition parameters with the right dimensions
 createParams = function(model){
-
   transition_model_params = lapply(
     model$transition_model$dont_touch$latent_states_names, function(latent_state_name){
       lapply(model$transition_model$to_specify$variable_basis_interactions[latent_state_name,],
@@ -62,12 +75,7 @@ createParams = function(model){
   return(list("transition_params" = transition_model_params, "emission_params" = emission_params))
 }
 
-plotTransitionGraph = function(model){
-  g = model$transition_model$to_specify$possible_transitions
-  diag(g) = 0
-  g = igraph::graph_from_adjacency_matrix(g)
-  plot(g)
-}
+
 
 
 

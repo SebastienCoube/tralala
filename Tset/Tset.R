@@ -1,3 +1,4 @@
+remove(list = ls())# I dont care if you judge me
 source("R/initialize_model.R")
 source("R/check_data.R")
 source("R/transition_model.R")
@@ -142,30 +143,17 @@ params$transition_params$I$Intercept[1,"D"] = -8
 params$transition_params$I$Intercept[2,"D"] = -5
 params$transition_params$I$Intercept[3,"D"] = -4
 params$transition_params$I$Intercept[4,"D"] = -3
-params$transition_params$I$Intercept[5,"D"] = -2
-params$transition_params$I$Intercept[6,"D"] = 1
-params$transition_params$I$Intercept[7,"D"] = 1
-params$transition_params$I$Intercept[8,"D"] = 1
-params$transition_params$I$Intercept[9,"D"] = 1
 
 params$transition_params$R$Intercept[1,"S"] = -8
 params$transition_params$R$Intercept[2,"S"] = -8
 params$transition_params$R$Intercept[3,"S"] = -7
 params$transition_params$R$Intercept[4,"S"] = -6
-params$transition_params$R$Intercept[5,"S"] = -5
-params$transition_params$R$Intercept[6,"S"] = -4
-params$transition_params$R$Intercept[7,"S"] = -4
-params$transition_params$R$Intercept[8,"S"] = -4
 params$transition_params$R$Intercept[,"D"] = -8
 
 params$emission_params[,"S"] = c(37, -2)
 params$emission_params[,"I"] = c(39, 0)
 params$emission_params[,"R"] = c(37, -2)
 params$emission_params[,"D"] = c(0, -10)
-
-transition_model = model$transition_model
-emission_model = model$emission_model
-data_seq = model$data_list$individual_1
 
 
 source("R/simulate_data.R")

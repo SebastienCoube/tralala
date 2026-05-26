@@ -41,37 +41,44 @@ initializeModelStep2 = function(model){
 initializeModelStep3 = function(model){
   checkExplanatoryVariablesEffects(model$transition_model)
   model$transition_model = c(model$transition_model$dont_touch, model$transition_model$to_specify)
+  model$transition_model$outstates =
+    apply(model$transition_model$possible_transitions, 1, function(x)model$transition_model$latent_states_names[which(x)])
+  model$transition_model$outstates = mapply(
+    setdiff, model$transition_model$outstates, model$transition_model$latent_states_names
+  )
+  model$transition_model$number_outstates = lapply(model$transition_model$outstates, length)
   return(model)
 }
 
 # Creates transition parameters with the right dimensions
 createParams = function(model){
   transition_model_params = lapply(
-    model$transition_model$dont_touch$latent_states_names, function(latent_state_name){
-      lapply(model$transition_model$to_specify$variable_basis_interactions[latent_state_name,],
-             function(BTF_name){
-               if(is.na(BTF_name))return(NULL)
-               res = matrix(0,
-                            nrow = length(model$transition_model$dont_touch$temporal_basis_function_list[[BTF_name]]+1),
-                            ncol = sum(model$transition_model$to_specify$possible_transitions[latent_state_name,])-1)
-               colnames(res) = model$transition_model$dont_touch$latent_states_names[
-                 setdiff(which(model$transition_model$to_specify$possible_transitions[latent_state_name,]!=0), match(latent_state_name, model$transition_model$dont_touch$latent_states_names))
-               ]
-               return(res)
-             })
+    model$transition_model$latent_states_names, function(latent_state_name){
+      if(is.null(model$transition_model$explanatory_variables_effects[[latent_state_name]]))return(NULL)
+
+      res = apply(
+        model$transition_model$explanatory_variables_effects[[latent_state_name]], 1,
+        function(x){
+          if(x[1])return(NULL)
+          if(x[2]){
+            res = matrix(0, 1, model$transition_model$number_outstates[[latent_state_name]])
+            colnames(res) = model$transition_model$outstates[[latent_state_name]]
+            return(res)
+            }
+          if(x[3]){
+            res = matrix(
+              0, 1 + length(model$transition_model$BTF_per_state[[latent_state_name]]),
+              model$transition_model$number_outstates[[latent_state_name]])
+              colnames(res) = model$transition_model$outstates[[latent_state_name]]
+            return(res)
+            }
+        },
+        simplify = F)
     })
-  names(transition_model_params) =  model$transition_model$dont_touch$latent_states_names
-  for(i in seq(length(transition_model_params), 1)){
-    for(j in seq(length(transition_model_params[[i]]), 1)){
-      if(is.null(transition_model_params[[i]][[j]]))transition_model_params[[i]][[j]] = NULL
-    }
-  }
-  for(i in seq(length(transition_model_params), 1)){
-    if(length(transition_model_params[[i]])==0)transition_model_params[[i]] = NULL
-  }
-  emission_params = matrix(0, length(model$emission_model$dont_touch$estimated_emission_param_names), length(model$transition_model$dont_touch$latent_states_names))
-  colnames(emission_params) = model$transition_model$dont_touch$latent_states_names
-  row.names(emission_params) = model$emission_model$dont_touch$estimated_emission_param_names
+  names(transition_model_params) = model$transition_model$latent_states_names
+  emission_params = matrix(0, length(model$emission_model$estimated_emission_param_names), length(model$transition_model$latent_states_names))
+  colnames(emission_params) = model$transition_model$latent_states_names
+  row.names(emission_params) = model$emission_model$estimated_emission_param_names
   return(list("transition_params" = transition_model_params, "emission_params" = emission_params))
 }
 

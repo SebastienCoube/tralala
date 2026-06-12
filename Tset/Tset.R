@@ -3,6 +3,7 @@ source("R/initialize_model.R")
 source("R/check_data.R")
 source("R/transition_model.R")
 source("R/emission_model.R")
+source("R/forward.R")
 
 
 # initializing transition model
@@ -27,7 +28,7 @@ plot(data_list$individual_1$explanatory_variables_transition[,2])
 # First step of model
 model = initializeModelStep1(
   # names of the latent states
-  latent_states_names = c("S", "I", "R", "D"),
+  latent_states = c("S", "I", "R", "D"),
   # observations
   data_list = data_list,
   # emission parameters whose value is fixed by the user
@@ -106,10 +107,10 @@ print(model$transition_model$to_specify$BTF_per_state)
 model$transition_model$to_specify$BTF_per_state$I = makeBTF(c(5, 10, 15))
 model$transition_model$to_specify$BTF_per_state$R = makeBTF(c(50, 100, 150))
 
-# Fixing parameters for the emission distribution
-model$emission_model$to_specify$fixed_emission_params["pcr_prob", c("S","I", "R", "D")] = c(0,1,0,0)
-model$emission_model$to_specify$fixed_emission_params["sero_prob", c("S","I", "R", "D")] = c(0,1,1,0)
-model$emission_model$to_specify$fixed_emission_params["death_prob", c("S","I", "R", "D")] = c(0,0,0,1)
+# Fixing parameters for the emission distribution 1e-
+model$emission_model$to_specify$fixed_emission_params["pcr_prob", c("S","I", "R", "D")] =   c(1e-6,1,1e-6,1e-6)
+model$emission_model$to_specify$fixed_emission_params["sero_prob", c("S","I", "R", "D")] =  c(1e-6,1,1,1e-6)
+model$emission_model$to_specify$fixed_emission_params["death_prob", c("S","I", "R", "D")] = c(1e-6,1e-6,1e-6,1)
 
 
 model = initializeModelStep2(model)
@@ -125,8 +126,12 @@ model = initializeModelStep3(model)
 
 
 
+
+
 # creating transition parameters with the format deduced from the transition model
 params = createParams(model)
+params$transition_params$S
+
 
 # adding value for the transition parameters
 params$transition_params$S$Intercept[,"I"]= 0
@@ -156,42 +161,8 @@ params$emission_params[,"R"] = c(37, -2)
 params$emission_params[,"D"] = c(0, -10)
 
 
-source("R/simulate_data.R")
 
-set.seed(1)
-latent_states_sample = sampleLatentState(
-  n_samples = 10, model = model,
-  initial_latent_state = rep("S", 10),
-  initial_time_counter = rep(1, 10),
-  params = params, data_seq = model$data_list[[1]])
-par (mfrow = c(1, 1))
-plotLatentState(latent_states_sample$latent_state[,1], model = model)
-
-emission_sampler = function(estimated_emission_params_vec, fixed_emission_params_vec){
-  res = c("PCR" = NA, "sero" = NA, "body_temp" = NA, "death" = NA)
-  res["body_temp"] = rnorm(1, estimated_emission_params_vec["body_temp_mean"], exp(estimated_emission_params_vec["log_body_temp_sd"]))
-  if(runif(1)>.95)res["PCR"] = rbinom(1, 1, fixed_emission_params_vec["pcr_prob"])
-  if(runif(1)>.95)res["sero"] = rbinom(1, 1, fixed_emission_params_vec["sero_prob"])
-  res["death"] = rbinom(1, 1, fixed_emission_params_vec["death_prob"])
-  return(res)
-}
-
-emission_sample = sampleEmissions(
-  data_seq = data_seq, model = model, params = params,
-  latent_state_seq = latent_states_sample$latent_state[,1],
-  emission_sampler = emission_sampler
-  )
-
-data_list = addEmissionsInDataList(
-  data_list = data_list,
-  model = model, params = params,
-  emission_sampler = emission_sampler,
-  initial_latent_state = rep("S", length(data_list)),
-  initial_time_counter = rep(1, length(data_list))
-)
+preprocessed_tbf = preprocessTbf(params, model)
 data_seq = data_list[[1]]
 
-par(mfrow = c(2, 1))
-par(mar = c(2,4,1,1))
-plotLatentState(data_seq$latent_states$latent_state, model)
-plot(seq(length(data_seq$emissions)), sapply(data_seq$emissions, function(x)x["body_temp"]), ylab = "body temperature")
+

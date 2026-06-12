@@ -1,4 +1,89 @@
 
+  # x = tent_matrix(knots = c(1, seq(3)*10), eval_points = seq(30))
+  # plot(x[,1])
+  # plot(x[,2])
+  # plot(x[,3])
+  # plot(x[,4])
+tent_matrix <- function(knots, eval_points) {
+  knots_sorted <- sort(unique(knots))
+  all_knots    <- c(0L, knots_sorted)
+
+  n_knots <- length(knots_sorted)
+  n_eval  <- length(eval_points)
+
+  mat <- matrix(0.0, nrow = n_eval, ncol = n_knots)
+  rownames(mat) <- eval_points
+  colnames(mat) <- knots_sorted
+
+  for (i in seq_len(n_knots)) {
+    k      <- all_knots[i + 1]
+    k_prev <- all_knots[i]
+    k_next <- all_knots[i + 2]
+
+    for (j in seq_len(n_eval)) {
+      x <- eval_points[j]
+
+      if (x > k_prev && x < k) {
+        mat[j, i] <- (x - k_prev) / (k - k_prev)
+      } else if (x == k) {
+        mat[j, i] <- 1.0
+      } else if (!is.na(k_next) && x > k && x < k_next) {
+        mat[j, i] <- (k_next - x) / (k_next - k)
+      }
+    }
+  }
+  mat
+}
+
+
+
+  preprocessTbf_ = function(transition_model, params){
+    # pre-multiply TBFs by respective parameters
+    active_explanatory_variables_per_state = apply(
+      transition_model$to_specify$variable_basis_interactions, 1,
+      function(x)colnames(transition_model$to_specify$variable_basis_interactions)[which(!is.na(x))])
+
+    pre_multiplied_combined_tbf = lapply(non_absorbing_states, function(state_name){
+      res = array(
+        0,
+        dim =  c(
+          length(combined_tbf_per_state[[state_name]]),
+          length(active_explanatory_variables_per_state[[state_name]]),
+          n_exit_states[state_name]
+        ))
+      dimnames(res) = list(
+        combined_tbf_per_state[[state_name]],
+        active_explanatory_variables_per_state[[state_name]],
+        exit_states[[state_name]]
+      )
+      res
+    })
+    names(pre_multiplied_combined_tbf) = non_absorbing_states
+    for(state_name in non_absorbing_states){
+      for(explanatory_variable in active_explanatory_variables_per_state[[state_name]]){
+        pre_multiplied_combined_tbf[[state_name]][,explanatory_variable,] <-
+          single_to_combined_conversion[[state_name]][[transition_model$to_specify$variable_basis_interactions[state_name, explanatory_variable]]] %*%
+          params$transition_params[[state_name]][[explanatory_variable]]
+      }
+    }
+
+
+    return(
+      list(
+        semi_markov_depths_per_state = semi_markov_depths_per_state,
+        exit_states = exit_states,
+        n_exit_states = n_exit_states,
+        exit_states_mat = exit_states_mat,
+        is_state_absorbing = is_state_absorbing,
+        non_absorbing_states = non_absorbing_states,
+        active_explanatory_variables_per_state = active_explanatory_variables_per_state,
+        combined_tbf_per_state = combined_tbf_per_state,
+        single_to_combined_conversion = single_to_combined_conversion,
+        pre_multiplied_combined_tbf = pre_multiplied_combined_tbf)
+    )
+  }
+
+
 
 softmax = function(x){
   res = c(1, exp(x))
@@ -7,50 +92,39 @@ softmax = function(x){
 }
 normalize = function(x){x / sum(x)}
 
-preprocessTbf = function(params, model){
-  res = list()
-  for(origin_state in names(params$transition_params)){
-    res[[origin_state]] = list()
-    if(!model$transition_model$misc$is_state_absorbing[[origin_state]]){
-      res[[origin_state]] = list()
-      for(i in seq(model$transition_model$misc$BTFdim[origin_state]+1)){
-        res[[origin_state]][[i]] =
-          do.call(cbind, lapply(params$transition_params[[origin_state]], function(x)x[min(i, nrow(x)),]))
-      }
-      #for(outstate in colnames(params$transition_params[[origin_state]][[1]])){
-      #  res[[origin_state]][[outstate]] =
-      #    matrix(0, 1 + model$transition_model$misc$BTFdim[origin_state], length(model$transition_model$misc$active_explanatory_variables[[origin_state]]))
-      #  colnames(res[[origin_state]][[outstate]]) = model$transition_model$misc$active_explanatory_variables[[origin_state]]
-      #  for(explanatory_variable in model$transition_model$misc$active_explanatory_variables[[origin_state]]){
-      #    res[[origin_state]][[outstate]][,explanatory_variable] =
-      #      params$transition_params[[origin_state]][[explanatory_variable]][,outstate]
-      #  }
-      #}
-    }
-  }
-  res
-}
 
-
+preprocessed_tbf = preprocessTbf_(transition_model = model$transition_model, params = params)
 
 forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, grad = F){
 
   # filtering probabilities
-  logalpha = lapply(model$transition_model$misc$depth, function(x)rep(log(1/(model$transition_model$n_latent_states * x)), x))
+  logalpha = lapply(
+    model$transition_model$dont_touch$latent_states_names,
+    function(state_name)unname(rep(log(1/(model$transition_model$dont_touch$n_latent_states * preprocessed_tbf$semi_markov_depths_per_state[state_name])), preprocessed_tbf$semi_markov_depths_per_state[state_name])))
+  names(logalpha) = model$transition_model$dont_touch$latent_states_names
   # sum(exp(unlist(logalpha)))
-
 
   for(i in seq(2, length(data_seq$emissions))){
     # transition ####
-    probs_from_exit = rep(0, model$transition_model$n_latent_states); names(probs_from_exit) = model$transition_model$latent_states
-    for(state_name in model$transition_model$misc$non_absorbing_states){
-      depth = model$transition_model$misc$depth[state_name]
-      outstates = model$transition_model$misc$outstates[[state_name]]
-      explanatory_variables = model$transition_model$misc$active_explanatory_variables[[state_name]]
-
+    probs_from_exit = rep(0, model$transition_model$dont_touch$n_latent_states); names(probs_from_exit) = model$transition_model$dont_touch$latent_states_names
+    for(state_name in preprocessed_tbf$non_absorbing_states){
+      depth = preprocessed_tbf$semi_markov_depths_per_state[[state_name]]
+      outstates = preprocessed_tbf$exit_states[[state_name]]
+      value_at_node = matrix(
+        apply(
+        preprocessed_tbf$pre_multiplied_combined_tbf[[state_name]], c(3),
+        function(slice) {
+          slice %*% data_seq$explanatory_variables_transition[i-1,preprocessed_tbf$active_explanatory_variables_per_state[[state_name]]]
+          }),
+        ncol  = preprocessed_tbf$n_exit_states[[state_name]])
+      row.names(value_at_node) = dimnames(preprocessed_tbf$pre_multiplied_combined_tbf[[state_name]])[[1]]
+      colnames(value_at_node) = outstates
       # updating filtering probabilities at semi-Markov depth
-      BTF_idx = model$transition_model$misc$BTFdim[[state_name]]+1
-      tonic = softmax(preprocessed_tbf[[state_name]][[BTF_idx]] %*% data_seq$explanatory_variables_transition[i-1,explanatory_variables] )
+      #probs_from_exit[outstates] = probs_from_exit[outstates] + exp(logalpha[[state_name]][depth]) * tonic[-1]
+      #logalpha[[state_name]][depth] = logalpha[[state_name]][depth] + log(tonic[1])
+      # if depth > 0, make probability trickle down
+      tonic = softmax(value_at_node[nrow(value_at_node),])
+      next_node_idx = nrow(value_at_node)
       next_tonic = tonic
 
       for(u in seq(depth, 1)){
@@ -61,7 +135,7 @@ forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, g
           next_node_idx = next_node_idx - 1
           tonic = next_tonic
           next_tonic = softmax(value_at_node[next_node_idx,])
-          #delta_tonic = (next_tonic / tonic)^(1 / )
+          delta_tonic = (next_tonic / tonic)^(1 / )
           print(" ")
         }
 
@@ -71,13 +145,13 @@ forward_ = function(preprocessed_tbf, data_seq, model, params, storealpha = F, g
       }
     }
     # updating filtering probabilities at depth = 1
-    for(state_name in model$transition_model$dont_touch$latent_states){
+    for(state_name in model$transition_model$dont_touch$latent_states_names){
       logalpha[state_name] = logalpha[state_name] + log(probs_from_exit[state_name])
     }
 
     # emission ####
     ###############
-    for(state_name in transition_model$dont_touch$latent_states){
+    for(state_name in transition_model$dont_touch$latent_states_names){
     }
   }
 }
@@ -103,13 +177,13 @@ forward = function(data_seq, transition_model, emission_model, params, storealph
   # sum(sapply(lapply(alpha, exp), sum))
 
   # probabilities to enter in a new state
-  new_state_log_probabilities = rep(-Inf, length(transition_model$dont_touch$latent_states))
-  names(new_state_log_probabilities) = transition_model$dont_touch$latent_states
+  new_state_log_probabilities = rep(-Inf, length(transition_model$dont_touch$latent_states_names))
+  names(new_state_log_probabilities) = transition_model$dont_touch$latent_states_names
   for(time_idx in seq(length(data_seq$emissions))){
     # transition
     if(time_idx>1){
       new_state_log_probabilities[] = -Inf
-      for(s in model$transition_model$dont_touch$latent_states[which(!preprocessed_tbf$is_state_absorbing)] ){
+      for(s in model$transition_model$dont_touch$latent_states_names[which(!preprocessed_tbf$is_state_absorbing)] ){
         # computing log transition probabilities
         for(s_ in preprocessed_tbf$exit_states[[s]]){
           preprocessed_tbf$softmax_matrices[[s]][,s_] =
@@ -159,7 +233,7 @@ forward = function(data_seq, transition_model, emission_model, params, storealph
         }
       }
       # Probabilitites with time counter equal to 1
-      for(s in model$transition_model$dont_touch$latent_states[which(!preprocessed_tbf$is_state_absorbing)] ){
+      for(s in model$transition_model$dont_touch$latent_states_names[which(!preprocessed_tbf$is_state_absorbing)] ){
         alpha[[s]][1] = matrixStats::logSumExp(c(
           alpha[[s]][1],
           new_state_log_probabilities[s]
@@ -167,7 +241,7 @@ forward = function(data_seq, transition_model, emission_model, params, storealph
       }
     }
     # re-weighting by emission density
-    for(s in transition_model$dont_touch$latent_states){
+    for(s in transition_model$dont_touch$latent_states_names){
       alpha[[s]] = alpha[[s]] +
         emission_model$dont_touch$log_likelihood(
           estimated_emission_param_vec = params$emission_params[,s],

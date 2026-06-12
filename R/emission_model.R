@@ -30,11 +30,17 @@ checkEmissionLogLikelihood = function(f, name){
   if(any(is.na(match(formalArgs(f), c("estimated_emission_param_vec", "fixed_emission_param_vec", "emission", "explanatory_variable_vec"))))){
     stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_vec, fixed_emission_param_vec, emission, and optionally explanatory_variable_vec"))
   }
-  if(any(is.na(match(c("estimated_emission_param_vec", "fixed_emission_param_vec", "emission"), formalArgs(f))))){
-    stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_vec, fixed_emission_param_vec, emission, and optionally explanatory_variable_vec"))
+  if(
+    all(
+      any(is.na(match(c("fixed_emission_param_vec",     "emission"), formalArgs(f)))),
+      any(is.na(match(c("estimated_emission_param_vec", "emission"), formalArgs(f))))
+    )){
+    stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_vec and/or fixed_emission_param_vec, emission, and optionally explanatory_variable_vec"))
   }
 }
-checkEmissionLogPrior = function(f, name){
+checkEmissionLogPrior = function(f, name, estimated_emission_param_names){
+  if(is.null(f)&(!is.null(estimated_emission_param_names)))stop("estimated_emission_param_names was provided, but not emission_log_prior")
+  if(is.null(f))return(invisible())
   if(!is.function(f))stop(paste(name, " must be a function"))
   if(formalArgs(f) != "estimated_emission_param_mat"){
     stop(paste("The formal arguments of the function", name, "must be: estimated_emission_param_mat"))
@@ -83,9 +89,9 @@ beginEmissionModel = function(
   }
 
   # Checking the function provided for the emission prior
-  checkEmissionLogPrior(emission_log_prior, "emission_log_prior")
+  checkEmissionLogPrior(emission_log_prior, "emission_log_prior", estimated_emission_param_names)
   if(verbose){
-    message(paste("The function emission_log_prior has been checked succesfully, but you have to make sure that it is an actual log-density over the", length(latent_states_names), "x", length(estimated_emission_param_names), "estimated emission parameters" ))
+    if(!is.null(emission_log_prior))message(paste("The function emission_log_prior has been checked succesfully, but you have to make sure that it is an actual log-density over the", length(latent_states_names), "x", length(estimated_emission_param_names), "estimated emission parameters" ))
   }
   emission_log_prior_grad = function(estimated_emission_param_mat){
     res = 0*estimated_emission_param_mat
@@ -97,7 +103,6 @@ beginEmissionModel = function(
       params_[i] = estimated_emission_param_mat[i]
     }
   }
-  checkEmissionLogPrior(emission_log_prior_grad, "emission_log_prior_grad")
   if(verbose){
     message("emission_log_prior_grad checked succesfully")
     message("----------")
@@ -113,7 +118,7 @@ beginEmissionModel = function(
   res$dont_touch$estimated_emission_param_names = estimated_emission_param_names
   res$dont_touch$fixed_emission_param_names = fixed_emission_param_names
   # creating matrix of fixed emission params at the right format. To be filled by the user
-  if(!is.null(estimated_emission_param_names)){
+  if(!is.null(fixed_emission_param_names)){
     res$to_specify = list()
     fixed_emission_params = matrix(NA, length(fixed_emission_param_names), length(latent_states_names))
     row.names(fixed_emission_params) = fixed_emission_param_names

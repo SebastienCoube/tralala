@@ -2,19 +2,19 @@
 # transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
 
 beginTransitionModel = function(
-    explanatory_variable_names, latent_states_names
+    explanatory_variable_names, latent_states
 ){
   # graph of possible transitions between latent states
-  possible_transitions = matrix(TRUE, length(latent_states_names), length(latent_states_names))
-  row.names(possible_transitions) = latent_states_names
-  colnames(possible_transitions) = latent_states_names
+  possible_transitions = matrix(TRUE, length(latent_states), length(latent_states))
+  row.names(possible_transitions) = latent_states
+  colnames(possible_transitions) = latent_states
   names(dimnames(possible_transitions)) = c("from", "to")
   # Empty list of BTF for each latent state
-  BTF_per_state <- lapply(latent_states_names, function(x)NULL)
-  names(BTF_per_state) <- latent_states_names
+  BTF_per_state <- lapply(latent_states, function(x)NULL)
+  names(BTF_per_state) <- latent_states
   # Covariates effects per state
   covariate_effect_per_state <- lapply(
-    latent_states_names, function(x){
+    latent_states, function(x){
       res = matrix(FALSE, length(explanatory_variable_names), 3)
       row.names(res) = explanatory_variable_names
       colnames(res) = c("not used", "used", "used * BTF")
@@ -22,7 +22,7 @@ beginTransitionModel = function(
       res
     }
   )
-  names(covariate_effect_per_state) = latent_states_names
+  names(covariate_effect_per_state) = latent_states
   return(list(
     to_specify =
       list(
@@ -31,8 +31,8 @@ beginTransitionModel = function(
       ),
     dont_touch =
       list(
-        "latent_states_names" = latent_states_names,
-        "n_latent_states" = length(latent_states_names),
+        "latent_states" = latent_states,
+        "n_latent_states" = length(latent_states),
         "explanatory_variable_names" = explanatory_variable_names)
   ))
 }
@@ -80,23 +80,23 @@ plotBTF = function(BTF, log.x = T){
 
 # transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
 # transition_mat = transition_model$to_specify$possible_transitions
-# latent_states_names = transition_model$dont_touch$latent_states_names
-# checkTransitionMat(transition_mat, latent_states_names)
+# latent_states = transition_model$dont_touch$latent_states
+# checkTransitionMat(transition_mat, latent_states)
 # transition_mat[1,1]=F
-# checkTransitionMat(transition_mat, latent_states_names)
+# checkTransitionMat(transition_mat, latent_states)
 # transition_mat[1,1]=T
 # transition_mat[1,2]=F
-# checkTransitionMat(transition_mat, latent_states_names)
+# checkTransitionMat(transition_mat, latent_states)
 # transition_mat[1,2]="a"
-# checkTransitionMat(transition_mat, latent_states_names)
+# checkTransitionMat(transition_mat, latent_states)
 # transition_mat[1,2]=F
 # colnames(transition_mat) = NULL
-# checkTransitionMat(transition_mat, latent_states_names)
+# checkTransitionMat(transition_mat, latent_states)
 
 checkTransitionMat <- function(transition_model){
-  latent_states_names = transition_model$dont_touch$latent_states_names
+  latent_states = transition_model$dont_touch$latent_states
   transition_mat = transition_model$to_specify$possible_transitions
-  n <- length(latent_states_names)
+  n <- length(latent_states)
 
   if (nrow(transition_mat) != n || ncol(transition_mat) != n) {
     stop(sprintf(
@@ -105,18 +105,18 @@ checkTransitionMat <- function(transition_model){
     ))
   }
 
-  if (!identical(rownames(transition_mat), latent_states_names)) {
+  if (!identical(rownames(transition_mat), latent_states)) {
     stop(sprintf(
-      "<your model>$transition_model$to_specify$possible_transitions row names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
-      paste(latent_states_names,      collapse = ", "),
+      "<your model>$transition_model$to_specify$possible_transitions row names do not match latent_states.\n  Expected: %s\n  Found:    %s",
+      paste(latent_states,      collapse = ", "),
       paste(rownames(transition_mat), collapse = ", ")
     ))
   }
 
-  if (!identical(colnames(transition_mat), latent_states_names)) {
+  if (!identical(colnames(transition_mat), latent_states)) {
     stop(sprintf(
-      "<your model>$transition_model$to_specify$possible_transitions column names do not match latent_states_names.\n  Expected: %s\n  Found:    %s",
-      paste(latent_states_names,      collapse = ", "),
+      "<your model>$transition_model$to_specify$possible_transitions column names do not match latent_states.\n  Expected: %s\n  Found:    %s",
+      paste(latent_states,      collapse = ", "),
       paste(colnames(transition_mat), collapse = ", ")
     ))
   }
@@ -129,10 +129,10 @@ checkTransitionMat <- function(transition_model){
 # transition_model = beginTransitionModel(c("Intercept", "X1", "X2"), c("S", "I", "R", "D"))
 # transition_model$to_specify$BTF_per_state$R = makeBTF(c(3,100))
 # transition_model$to_specify$BTF_per_state$I = makeBTF(c(3,100))
-# checkBTF(transition_model$dont_touch$latent_states_names, transition_model$to_specify$BTF_per_state)
+# checkBTF(transition_model$dont_touch$latent_states, transition_model$to_specify$BTF_per_state)
 
 checkBTF <- function(transition_model) {
-  latent_states_names = transition_model$dont_touch$latent_states_names
+  latent_states = transition_model$dont_touch$latent_states
   BTF_list = transition_model$to_specify$BTF_per_state
   # Check 1: names of the list match the character vector
   list_names <- names(BTF_list)
@@ -141,10 +141,10 @@ checkBTF <- function(transition_model) {
     stop("<your model>$transition_model$to_specify$BTF_per_state has no names.")
   }
 
-  if (!identical(sort(list_names), sort(latent_states_names))) {
+  if (!identical(sort(list_names), sort(latent_states))) {
     stop(sprintf(
       "<your model>$transition_model$to_specify$BTF_per_state latent states names do not match the expected latent states names.\n  Expected: %s\n  Got:      %s",
-      paste(sort(latent_states_names), collapse = ", "),
+      paste(sort(latent_states), collapse = ", "),
       paste(sort(list_names), collapse = ", ")
     ))
   }
@@ -201,7 +201,7 @@ continueTransitionModel = function(transition_model){
   transition_model$to_specify = list(
     transition_effects =
       lapply(
-        transition_model$dont_touch$latent_states_names,
+        transition_model$dont_touch$latent_states,
         function(name){
           if(sum(transition_model$dont_touch$possible_transitions[name,])==1)return(NULL)
           if(is.null(transition_model$dont_touch$BTF_per_state[[name]])){
@@ -234,7 +234,7 @@ createExplanatoryVariablesEffects = function(transition_model){
   transition_model$dont_touch = c(transition_model$dont_touch, transition_model$to_specify)
   transition_model$to_specify = list()
   transition_model$to_specify$explanatory_variables_effects = lapply(
-      transition_model$dont_touch$latent_states_names, function(latent_states_name){
+      transition_model$dont_touch$latent_states, function(latent_states_name){
         if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1)return(NULL)
         if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
           res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 2)
@@ -250,14 +250,14 @@ createExplanatoryVariablesEffects = function(transition_model){
         }
       }
     )
-  names(transition_model$to_specify$explanatory_variables_effects) = transition_model$dont_touch$latent_states_names
+  names(transition_model$to_specify$explanatory_variables_effects) = transition_model$dont_touch$latent_states
   return(transition_model)
 }
 
 
 checkExplanatoryVariablesEffects = function(transition_model){
   lapply(
-    transition_model$dont_touch$latent_states_names, function(latent_states_name){
+    transition_model$dont_touch$latent_states, function(latent_states_name){
       if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1){
         if(!is.null(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be null"))
         return(invisible())

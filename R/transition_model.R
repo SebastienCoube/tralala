@@ -237,17 +237,19 @@ createExplanatoryVariablesEffects = function(transition_model){
       transition_model$dont_touch$latent_states, function(latent_states_name){
         if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1)return(NULL)
         if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 2)
+          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 1)
           row.names(res) = transition_model$dont_touch$explanatory_variable_names
-          colnames(res) =  c("no effect", "simple effect")
-          return(res)
+          colnames(res) =  c("simple effect")
         }
         if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 3)
+          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 2)
           row.names(res) = transition_model$dont_touch$explanatory_variable_names
-          colnames(res) =  c("no effect", "simple effect", "BTF interaction")
-          return(res)
+          colnames(res) =  c("simple effect", "BTF interaction")
         }
+        names(dimnames(res)) = c("covariate", "effect")
+        res[1, ncol(res)] = T
+        res[-1, 1] = T
+        return(res)
       }
     )
   names(transition_model$to_specify$explanatory_variables_effects) = transition_model$dont_touch$latent_states
@@ -258,23 +260,33 @@ createExplanatoryVariablesEffects = function(transition_model){
 checkExplanatoryVariablesEffects = function(transition_model){
   lapply(
     transition_model$dont_touch$latent_states, function(latent_states_name){
+      # checking if NULL BTF
       if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1){
         if(!is.null(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be null"))
         return(invisible())
       }
-      if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-        if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
-        if(!any(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]][,2]))stop(paste("The 'simple effect' column of <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at least one TRUE slot"))
-        if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)!=1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have exactly one TRUE per row"))
 
-        return(invisible())
+      # if non NULL BTF
+      # check Boolean
+      if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
+      # check only one TRUE per row
+      if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)>1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at most one TRUE per row"))
+      # check row names
+      if(any(row.names(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!=model$transition_model$dont_touch$explanatory_variable_names)){
+        stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have row names corresponding to the explanatory variables in <your model>$transition_model$dont_touch$explanatory_variable_names "))
+      }
+      # check column names
+      if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
+        if(any(colnames(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!= "simple effect")){
+          stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have column names equal to `simple effect` "))
+        }
       }
       if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-        if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
-        if(!any(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]][,3]))stop(paste("The 'BTF interaction' column of <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at least one TRUE slot"))
-        if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)!=1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have exactly one TRUE per row"))
-        return(invisible())
+        if(any(colnames(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!= c("simple effect", "BTF interaction"))){
+          stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have column names equal to `simple effect` and `BTF interaction` "))
+        }
       }
+      return(invisible())
     }
   )
   return(invisible())

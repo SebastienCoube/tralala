@@ -1,44 +1,32 @@
-initializeModelStep1 = function(
+initializeStep1 = function(
     latent_states,
-    data_list,
-    fixed_emission_param_names,
-    estimated_emission_param_names = NULL,
-    emission_log_likelihood,
-    emission_log_prior = NULL
+    data_list
 ){
   res = list()
   # check data
-  checkDataList(data_list)
+  data_list = checkDataList(data_list)
   # transition model
   res$transition_model = beginTransitionModel(
-    explanatory_variable_names = colnames(data_list[[1]]$explanatory_variables_transition),
+    explanatory_variable_names = colnames(data_list[[1]]$explanatory_variables),
     latent_states = latent_states)
-  # emission model
-  res$emission_model = beginEmissionModel(
-    nvar = ncol(data_list[[1]]$explanatory_variables_emission),
-    latent_states = latent_states,
-    fixed_emission_param_names = fixed_emission_param_names,
-    estimated_emission_param_names = estimated_emission_param_names,
-    emission_log_likelihood = emission_log_likelihood,
-    emission_log_prior = emission_log_prior
-  )
   res$data_list = data_list
+  message(
+    "First step of model initialization done.\nGo to <your model>$transition_model$to_specify and modify what needs be.\nThen run initializeStep2."
+  )
   res
 }
 
-initializeModelStep2 = function(model){
-  checkFixedEmissionParams(
-    latent_states = model$transition_model$dont_touch$latent_states,
-    fixed_emission_params_names = model$emission_model$dont_touch$fixed_emission_param_names,
-    fixed_emission_params = model$emission_model$to_specify$fixed_emission_params)
-  model$emission_model = c(model$emission_model$dont_touch, model$emission_model$to_specify)
+initializeStep2 = function(model){
   checkTransitionMat(model$transition_model)
   checkBTF(model$transition_model)
   model$transition_model = createExplanatoryVariablesEffects(model$transition_model)
+  message(
+    "Second step of model initialization done.\nGo to <your model>$transition_model$to_specify and modify what needs be.\nThen run initializeStep3."
+  )
   return(model)
 }
 
-initializeModelStep3 = function(model){
+initializeStep3 = function(model){
   checkExplanatoryVariablesEffects(model$transition_model)
   model$transition_model = c(model$transition_model$dont_touch, model$transition_model$to_specify)
   model$transition_model$misc$outstates =
@@ -72,8 +60,43 @@ initializeModelStep3 = function(model){
       if(is.null(x)) return(0)
       return(length(x))
       })
+
+  model$emission_model = list(
+    "to_specify" = list(emission_log_likelihood = "function(emission, at least one emission parameter)")
+
+    )
+  message(
+    "Third step of model initialization done, the transition model is done.\nNow, the *emission model* is starting.\nGo to <your model>$emission_model$to_specify and modify what needs be.\nThen run initializeStep4."
+  )
   return(model)
 }
+
+
+initializeStep4 = function(model){
+  checkEmissionLogLikelihood1(model$emission_model$to_specify$emission_log_likelihood)
+  model$emission_model$dont_touch <- list(emission_log_likelihood = model$emission_model$to_specify$emission_log_likelihood)
+  model$emission_model$to_specify <- list()
+  argnames = setdiff(
+    formalArgs(model$emission_model$dont_touch$emission_log_likelihood),
+    "emission")
+  model$emission_model$dont_touch$emission_param_names <- argnames
+  model$emission_model$to_specify$param_length <-
+    lapply(argnames, function(x)return(1))
+  names(model$emission_model$to_specify$param_length) <- argnames
+  message(
+    "Fourth step of model initialization done.\nGo to <your model>$emission_model$to_specify and modify what needs be.\nThen run initializeStep5."
+  )
+  return(model)
+}
+
+initializeStep5 = function(model){
+ model <- createExplanatoryVariablesEffectsEmission(model)
+  message(
+    "Fifth step of model initialization done.\nGo to <your model>$emission_model$to_specify and modify what needs be.\nThen run initializeStep5."
+  )
+  return(model)
+}
+
 
 # Creates transition parameters with the right dimensions
 createParams = function(model){

@@ -12,11 +12,11 @@ plot(temperature_series)
 data_list = list(
   individual_1 = list(
     explanatory_variables = matrix(cbind(temperature_series), ncol= 1, dimnames = list(NULL, c("day_temperature")) ),
-    emissions = lapply(seq(seq_length), function(x)return("S"))
+    emissions = lapply(seq(seq_length), function(x)return(NA))
   ),
   individual_2 = list(
     explanatory_variables = matrix(cbind(temperature_series), ncol= 1, dimnames = list(NULL, c("day_temperature")) ),
-    emissions = lapply(seq(seq_length), function(x)return("I"))
+    emissions = lapply(seq(seq_length), function(x)return(NA))
   )
 )
 plot(data_list$individual_1$explanatory_variables[,1])
@@ -51,30 +51,48 @@ model$transition_model$to_specify$explanatory_variables_effects$I[2,] = F
 model$transition_model$to_specify$explanatory_variables_effects$R[2,] = F
 model = initializeStep3(model)
 
-model$emission_model$to_specify$emission_log_likelihood
-
 # fourth step
-model$emission_model$to_specify$emission_log_likelihood = function(
-    emission,
-    logprobs
-    #body_temperature_mean,
-    #body_temperature_logsd,
-    #PCR_logitprob,
-    #death_logitprob
-){
-  # observation of real state with error
-  softmax(c(0, logprobs))[match(emission, c("S", "I", "R", "D"))]
+model$emission_model$to_specify$emission_parameters_names <- c("pcr_logprob",
+                                                               "sero_logprob",
+                                                               "body_temp_mean",
+                                                               "body_temp_logsd")
+model$emission_model$to_specify$emission_explanatory_variables
+model = initializeStep4(model)
+
+emission_regression_coefficients_log_prior <- function(emission_regression_coeffs){
+  emission_regression_coefficients_log_prior
 }
 
-model = initializeStep4(model)
-model$emission_model$to_specify$param_length$logprobs = 3
+model$emission_model$to_specify$regression_coefficients_array_NOFILL
+model$emission_model$to_specify$emission_regression_coefficients_log_prior
 
+
+model$emission_model$to_specify$emission_log_likelihood = function(
+    emission,
+    pcr_logprob,
+    sero_logprob,
+    body_temp_mean,
+    body_temp_logsd
+){
+  res <- 0
+  if(!is.NA(emission$pcr))res <- res + dbinom(res, 1, exp(pcr_logprob)/(1+exp(pcr_logprob)),log = T)
+  if(!is.NA(emission$sero))res <- res + dbinom(res, 1, exp(sero_logprob)/(1+exp(sero_logprob)),log = T)
+  if(!is.NA(emission$body_temp))res <- res + dnorm(res, body_temp_mean, exp(body_temp_logsd),log = T)
+  res
+}
+
+model$transition_model$explanatory_variable_names
+model = initializeStep4(model)
+
+model$emission_model$to_specify$
+model$emission_model$to_specify$active_explanatory_variables
+
+model = initializeStep5(model)
 
 
 # creating transition parameters with the format deduced from the transition model
 params = createParams(model)
 params$transition_params$S
-
 
 # adding value for the transition parameters
 params$transition_params$S$Intercept[,"I"]= 0

@@ -256,7 +256,6 @@ createExplanatoryVariablesEffects = function(transition_model){
   return(transition_model)
 }
 
-
 checkExplanatoryVariablesEffects = function(transition_model){
   lapply(
     transition_model$dont_touch$latent_states, function(latent_states_name){
@@ -292,3 +291,11 @@ checkExplanatoryVariablesEffects = function(transition_model){
   return(invisible())
 }
 
+createTransitionParameters <- function(model){
+  res <- list()
+  for(latent_state in model$transition_model$latent_states){
+    if(length(model$transition_model$misc$outstates[[latent_state]]>0)){
+      res[[latent_state]] <- list()
+    }
+  }
+}

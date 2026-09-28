@@ -1,11 +1,5 @@
 
 
-softmax = function(x){
-  res = c(1, exp(x))
-  res = res/sum(res)
-  res
-}
-normalize = function(x){x / sum(x)}
 
 preprocessTbf = function(params, model){
   res = list()

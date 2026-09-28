@@ -224,7 +224,9 @@ continueTransitionModel = function(transition_model){
 }
 
 plotTransitionGraph = function(model){
-  g = model$transition_model$to_specify$possible_transitions
+  g = model$transition_model$possible_transitions
+  if(is.null(g))g = model$transition_model$dont_touch$possible_transitions
+  if(is.null(g))g = model$transition_model$to_specify$possible_transitions
   diag(g) = 0
   g = igraph::graph_from_adjacency_matrix(g)
   plot(g)
@@ -236,19 +238,9 @@ createExplanatoryVariablesEffects = function(transition_model){
   transition_model$to_specify$explanatory_variables_effects = lapply(
       transition_model$dont_touch$latent_states, function(latent_states_name){
         if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1)return(NULL)
-        if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 1)
-          row.names(res) = transition_model$dont_touch$explanatory_variable_names
-          colnames(res) =  c("simple effect")
-        }
-        if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-          res = matrix(F, length(transition_model$dont_touch$explanatory_variable_names), 2)
-          row.names(res) = transition_model$dont_touch$explanatory_variable_names
-          colnames(res) =  c("simple effect", "BTF interaction")
-        }
-        names(dimnames(res)) = c("covariate", "effect")
-        res[1, ncol(res)] = T
-        res[-1, 1] = T
+        res <- rep(FALSE, length(transition_model$dont_touch$explanatory_variable_names))
+        res[1] <- TRUE
+        names(res) <- transition_model$dont_touch$explanatory_variable_names
         return(res)
       }
     )
@@ -256,46 +248,23 @@ createExplanatoryVariablesEffects = function(transition_model){
   return(transition_model)
 }
 
-checkExplanatoryVariablesEffects = function(transition_model){
-  lapply(
-    transition_model$dont_touch$latent_states, function(latent_states_name){
-      # checking if NULL BTF
-      if(sum(transition_model$dont_touch$possible_transitions[latent_states_name,])==1){
-        if(!is.null(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be null"))
-        return(invisible())
-      }
-
-      # if non NULL BTF
-      # check Boolean
-      if(!is.logical(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]]))stop(paste("<your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must be logical"))
-      # check only one TRUE per row
-      if(any(apply(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]], 1, sum)>1))stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have at most one TRUE per row"))
-      # check row names
-      if(any(row.names(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!=model$transition_model$dont_touch$explanatory_variable_names)){
-        stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have row names corresponding to the explanatory variables in <your model>$transition_model$dont_touch$explanatory_variable_names "))
-      }
-      # check column names
-      if(is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-        if(any(colnames(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!= "simple effect")){
-          stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have column names equal to `simple effect` "))
-        }
-      }
-      if(!is.null(transition_model$dont_touch$BTF_per_state[[latent_states_name]])){
-        if(any(colnames(transition_model$to_specify$explanatory_variables_effects[[latent_states_name]])!= c("simple effect", "BTF interaction"))){
-          stop(paste("The matrix at <your model>$transition_model$to_specify$explanatory_variables_effects$", latent_states_name, "must have column names equal to `simple effect` and `BTF interaction` "))
-        }
-      }
-      return(invisible())
-    }
-  )
-  return(invisible())
-}
-
 createTransitionParameters <- function(model){
   res <- list()
-  for(latent_state in model$transition_model$latent_states){
-    if(length(model$transition_model$misc$outstates[[latent_state]]>0)){
-      res[[latent_state]] <- list()
-    }
+  for(latent_state in model$transition_model$misc$non_absorbing_states){
+      res[[latent_state]] <- array(
+        0,
+        dim = c(
+          model$transition_model$misc$BTFdim[[latent_state]],
+          model$transition_model$misc$number_active_explanatory_variables[[latent_state]],
+          model$transition_model$misc$number_outstates[[latent_state]]
+        ),
+        dimnames =  list(
+          paste("BTF", seq(model$transition_model$misc$BTFdim[[latent_state]])),
+          model$transition_model$misc$active_explanatory_variables[[latent_state]],
+          model$transition_model$misc$outstates[[latent_state]]
+        )
+      )
+      model$transition_model$misc$outstates[[latent_state]]
   }
+  res
 }

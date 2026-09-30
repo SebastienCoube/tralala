@@ -84,7 +84,7 @@ initializeStep4 = function(model){
   )
   model$emission_model$to_specify <- list(
     emission_log_likelihood = "function(emission, emission parameters)",
-    emission_regression_coefficients_log_prior = "function(emission_regression_coeffs)",
+    emission_regression_coefficients_log_prior = "function(emission_regression_coefficients)",
     regression_coefficients_array_NOFILL = createRandomEmissionCoeffs(
       emission_parameters = model$emission_model$dont_touch$emission_parameters_names,
       explanatory_variables = model$emission_model$dont_touch$emission_explanatory_variables,
@@ -100,7 +100,7 @@ initializeStep4 = function(model){
 
 # Fifth step: checking expected return of the emission likelihood and prior
 initializeStep5 = function(model, n_tests = 5, seed = 1){
-  if(formalArgs(model$emission_model$to_specify$emission_regression_coefficients_log_prior)!="emission_regression_coeffs")stop("Emission log-prior must have `emission_regression_coeffs` as argument")
+  if(formalArgs(model$emission_model$to_specify$emission_regression_coefficients_log_prior)!="emission_regression_coefficients")stop("Emission log-prior must have `emission_regression_coefficients` as argument")
   if(!identical(
     sort(match(formalArgs(model$emission_model$to_specify$emission_log_likelihood),
                c("emission", model$emission_model$dont_touch$emission_parameters_names))),
@@ -114,17 +114,17 @@ initializeStep5 = function(model, n_tests = 5, seed = 1){
   message("Testing emission log density and prior")
   set.seed(1)
   for(test_idx in seq(n_tests)){
-    emission_regression_coeffs <- createRandomEmissionCoeffs(
+    emission_regression_coefficients <- createRandomEmissionCoeffs(
       emission_parameters = model$emission_model$dont_touch$emission_parameters_names,
       explanatory_variables = model$emission_model$dont_touch$emission_explanatory_variables,
       latent_states = model$transition_model$latent_states)
-    prior_eval <- model$emission_model$to_specify$emission_regression_coefficients_log_prior(emission_regression_coeffs)
+    prior_eval <- model$emission_model$to_specify$emission_regression_coefficients_log_prior(emission_regression_coefficients)
     if(!is.numeric(prior_eval)|length(prior_eval)>1)stop("The emission log prior should return a numeric of length 1")
     for(ind_idx in seq(length(model$data_list))){
       for(time_idx in seq(length(model$data_list[[ind_idx]]$emissions))){
-        emission_params <- emission_parameters(
+        emission_params <- emissionParameters(
           explanatory_variables = model$data_list[[ind_idx]]$explanatory_variables[time_idx,],
-          emission_regression_coeffs)
+          emission_regression_coefficients)
         for(latent_state_idx in seq(length(model$transition_model$latent_states))){
           likelihood_eval <-
             do.call(

@@ -1,7 +1,7 @@
 
 
 
-sampleLatentState = function(model, transition_params, initial_state = NULL){
+sampleLatentState = function(model, transition_parameters, initial_state = NULL){
   # looping over individuals
   for(ind_idx in seq(length(model$data_list))){
     # initializing vector
@@ -28,9 +28,9 @@ sampleLatentState = function(model, transition_params, initial_state = NULL){
       if(model$transition_model$misc$is_state_absorbing[[current_latent_state]]){
         model$data_list[[ind_idx]]$latent_states[time_idx] <- model$data_list[[ind_idx]]$latent_states[time_idx-1]
       }else{
-        transition_probs <- value_at_btf_knots(
+        transition_probs <- valueAtBtfKnots(
           explanatory_variable = model$data_list[[ind_idx]]$explanatory_variables[time_idx,],
-          transition_param =  transition_params[[current_latent_state]]
+          transition_param =  transition_parameters[[current_latent_state]]
         )
         if(current_time_spent>=model$transition_model$misc$depth[current_latent_state]){
           transition_probs <- transition_probs[nrow(transition_probs),]

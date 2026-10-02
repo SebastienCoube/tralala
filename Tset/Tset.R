@@ -126,23 +126,23 @@ emissionParameters(emission_regression_coefficients, model$data_list$individual_
 sample_one_emission <- function(emission_regression_coefficients, latent_state, explanatory_variable){
   emission_parameters <- explanatory_variable[dimnames(emission_regression_coefficients)[[1]]] %*% emission_regression_coefficients[,,latent_state]
   colnames(emission_parameters) <- dimnames(emission_regression_coefficients)[[2]]
-  if(latent_state =="D")return(list("death"= T, "sero"= NA, "pcr"= NA, "body_temp" = NA))
-  res <- list("death"= F, "sero"= NA, "pcr"= NA, "body_temp" = NA)
-  if(runif(1)>.98){
-    res$sero <- rbinom(1,1,softmax(emission_parameters[,"sero_logprob"])[2])
-    res$pcr <-  rbinom(1,1,softmax(emission_parameters[,"pcr_logprob"])[2])
+  if(latent_state =="D")return(c("death"= T, "sero"= NA, "pcr"= NA, "body_temp" = NA))
+  res <- c("death"= F, "sero"= NA, "pcr"= NA, "body_temp" = NA)
+  if(runif(1)>.0){
+    res["sero"] <- rbinom(1,1,softmax(emission_parameters[,"sero_logprob"])[2])
+    res["pcr"] <-  rbinom(1,1,softmax(emission_parameters[,"pcr_logprob"])[2])
   }
-  if(runif(1)>0){
-    res$body_temp <- rnorm(1, emission_parameters[,"body_temp_mean"], exp(emission_parameters[,"body_temp_logsd"]))
+  if(runif(1)>1.0){
+    res["body_temp"] <- rnorm(1, emission_parameters[,"body_temp_mean"], exp(emission_parameters[,"body_temp_logsd"]))
   }
   return(res)
 }
 
 model <- sampleEmissions(model, emission_regression_coefficients, sample_one_emission)
 dev.off()
-plot(as.numeric(as.factor(sapply(model$data_list$individual_1$emissions, function(x)x[["death"]]))))
-plot(as.numeric(as.factor(sapply(model$data_list$individual_4$emissions, function(x)x[["death"]]))))
-plot(as.numeric(sapply(model$data_list$individual_1$emissions, function(x)x[["body_temp"]])))
+# plot(as.numeric(as.factor(sapply(model$data_list$individual_1$emissions, function(x)x[["death"]]))))
+# plot(as.numeric(as.factor(sapply(model$data_list$individual_4$emissions, function(x)x[["death"]]))))
+# plot(as.numeric(sapply(model$data_list$individual_1$emissions, function(x)x[["body_temp"]])))
 # plot(as.numeric(sapply(model$data_list$individual_1$emissions, function(x)x[["pcr"]])))
 # plot(as.numeric(sapply(model$data_list$individual_1$emissions, function(x)x[["sero"]])))
 
@@ -168,26 +168,60 @@ model$emission_model$to_specify$emission_regression_coefficients_log_prior <- fu
 
 model$emission_model$to_specify$emission_log_likelihood = function(
     emission,
-    death_obs_logprob,
-    pcr_logprob,
-    sero_logprob,
-    body_temp_mean,
-    body_temp_logsd
+    emission_parameters_vector
 ){
   res <- 0
-  if(!is.na(emission$death))res <- res +  dbinom(x = emission$death, size = 1, prob = exp(death_obs_logprob)/(1+exp(death_obs_logprob)),log = T)
-  if(!is.na(emission$pcr))res <- res +  dbinom(x = emission$pcr, size = 1, prob = exp(pcr_logprob)/(1+exp(pcr_logprob)),log = T)
-  if(!is.na(emission$sero))res <- res + dbinom(x = emission$sero, size = 1, prob = exp(sero_logprob)/(1+exp(sero_logprob)),log = T)
-  if(!is.na(emission$body_temp))res <- res + dnorm(emission$body_temp, body_temp_mean, exp(body_temp_logsd),log = T)
+  if(!is.na(emission["death"]))res <-     res + dbinom(x = emission["death"], size = 1, prob = softmax(emission_parameters_vector["death_obs_logprob"])[2],log = T)
+  if(!is.na(emission["pcr"]))res <-       res + dbinom(x = emission["pcr"],   size = 1, prob = softmax(emission_parameters_vector["pcr_logprob"]      )[2],log = T)
+  if(!is.na(emission["sero"]))res <-      res + dbinom(x = emission["sero"],  size = 1, prob = softmax(emission_parameters_vector["sero_logprob"]     )[2],log = T)
+  if(!is.na(emission["body_temp"]))res <- res + dnorm (x = emission["body_temp"], emission_parameters_vector["body_temp_mean"], exp(emission_parameters_vector["body_temp_logsd"]),log = T)
   res
 }
 
+model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY = function(
+    emission,
+    emission_parameters_vector
+){
+  grad <- c(
+    pcr_logprob       = 0,
+    sero_logprob      = 0,
+    body_temp_mean    = 0,
+    body_temp_logsd   = 0,
+    death_obs_logprob = 0
+  )
 
+  # Bernoulli with p = softmax(theta)[2] = plogis(theta)
+  # d/dtheta [ y*log(p) + (1-y)*log(1-p) ] = y - p
+  if(!is.na(emission["death"])){
+    p <- softmax(emission_parameters_vector["death_obs_logprob"])[2]
+    grad["death_obs_logprob"] <- emission["death"] - p
+  }
+  if(!is.na(emission["pcr"])){
+    p <- softmax(emission_parameters_vector["pcr_logprob"])[2]
+    grad["pcr_logprob"] <- emission["pcr"] - p
+  }
+  if(!is.na(emission["sero"])){
+    p <- softmax(emission_parameters_vector["sero_logprob"])[2]
+    grad["sero_logprob"] <- emission["sero"] - p
+  }
+
+  # Normal with mean mu and sd = exp(logsd)
+  # d/dmu    = (x - mu) / sd^2
+  # d/dlogsd = (x - mu)^2 / sd^2 - 1
+  if(!is.na(emission["body_temp"])){
+    mu <- emission_parameters_vector["body_temp_mean"]
+    sd <- exp(emission_parameters_vector["body_temp_logsd"])
+    z  <- emission["body_temp"] - mu
+    grad["body_temp_mean"]  <- z / sd^2
+    grad["body_temp_logsd"] <- z^2 / sd^2 - 1
+  }
+
+  grad
+}
+
+t1 <- Sys.time()
 model = initializeStep5(model)
-
-
-
-
+print(Sys.time()-t1)
 
 emission_model <- model$emission_model
 transition_model <- model$transition_model
@@ -203,11 +237,10 @@ test <- forward(emission_model = model$emission_model, transition_model = model$
                 emission_regression_coefficients = emission_regression_coefficients,
                 transition_parameters = transition_parameters, return_logprob_history = T)
 
-dev.off()
 filtering_probs <- filteringProbs(logprob_history = test$logprob_history)
 plot(col(filtering_probs),
      filtering_probs + .0025*row(filtering_probs),
      col = row(filtering_probs), pch = ".", cex = 2,
      xlab = "time", ylab = "filtering probabilities")
-legend("topright", fill = seq(nrow(filtering_probs)), legend = row.names(filtering_probs))
+legend("bottomright", fill = seq(nrow(filtering_probs)), legend = row.names(filtering_probs))
 

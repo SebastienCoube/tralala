@@ -61,13 +61,14 @@ sampleLatentState = function(model, transition_parameters, initial_state = NULL)
 
 
 
-sampleEmissions = function(model, emission_regression_coefficients, sample_one_emission){
+sampleEmissions = function(model, emission_regression_coefficients, sampleOneEmission){
   for(ind_idx in seq(length(model$data_list))){
+    emission_parameters <- emissionParameters(
+      explanatory_variables = model$data_list[[ind_idx]]$explanatory_variables,
+      emission_regression_coefficients = emission_regression_coefficients)
     for(time_idx in seq(1, length(model$data_list[[ind_idx]]$emissions))){
-      model$data_list[[ind_idx]]$emissions[[time_idx]] <- sample_one_emission(
-        emission_regression_coefficients,
-        explanatory_variable = model$data_list[[ind_idx]]$explanatory_variables[time_idx,],
-        latent_state = model$data_list[[ind_idx]]$latent_states[time_idx]
+      model$data_list[[ind_idx]]$emissions[[time_idx]] <- sampleOneEmission(
+        emission_parameter = emission_parameters[[model$data_list[[ind_idx]]$latent_states[time_idx]]][time_idx,]
       )
     }
   }

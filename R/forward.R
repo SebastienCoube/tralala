@@ -13,21 +13,21 @@ forward <- function(emission_model, transition_model, data_seq,
   if(return_logprob_history)logprob_history <-
       lapply(filtering_log_probs, function(x)matrix(0, length(x), n_time))
 
+  # Emission parameters depending on explanatory variables
+  emission_parameters <-
+    emissionParameters(
+      emission_regression_coefficients = emission_regression_coefficients,
+      explanatory_variables = data_seq$explanatory_variables[,emission_model$emission_explanatory_variables,drop=F])
   # looping over observations by chronological order
   for(time_idx in seq(n_time)){
     # 1 Updating current knowledge using the current emission log likelihood #####
-    # emission parameters depending on explanatory variables
-    emission_parameters <-
-      emissionParameters(
-        emission_regression_coefficients = emission_regression_coefficients,
-        explanatory_variables = data_seq$explanatory_variables[time_idx,emission_model$emission_explanatory_variables])
     for(latent_state in transition_model$latent_states){
       # 1a evaluation of the likelihood of the emission for each latent state ####
       filtering_log_probs[[latent_state]] <-
         filtering_log_probs[[latent_state]] +
         emission_model$emission_log_likelihood(
           emission = data_seq$emissions[[time_idx]],
-          emission_parameters_vector = emission_parameters[,latent_state])
+          emission_parameters_vector = emission_parameters[[latent_state]][time_idx,])
       # 1b saving filtering probability when whole history of log-probabilities is needed ####
       if(return_logprob_history)logprob_history[[latent_state]][,time_idx] <-
           filtering_log_probs[[latent_state]]

@@ -115,30 +115,28 @@ emission_regression_coefficients["Intercept","body_temp_mean",    "I"] = 39
 emission_regression_coefficients["Intercept","body_temp_logsd",   "I"] = -2
 emission_regression_coefficients["Intercept","death_obs_logprob", "I"] = emission_regression_coefficients["Intercept","death_obs_logprob",  "S"]
 
-emission_regression_coefficients["Intercept","pcr_logprob",       "D"] = 0
-emission_regression_coefficients["Intercept","sero_logprob",      "D"] = 0
-emission_regression_coefficients["Intercept","body_temp_mean",    "D"] = 0
-emission_regression_coefficients["Intercept","body_temp_logsd",   "D"] = 0
+emission_regression_coefficients["Intercept","pcr_logprob",       "D"] = -100
+emission_regression_coefficients["Intercept","sero_logprob",      "D"] = -100
+emission_regression_coefficients["Intercept","body_temp_mean",    "D"] = -100
+emission_regression_coefficients["Intercept","body_temp_logsd",   "D"] = -100
 emission_regression_coefficients["Intercept","death_obs_logprob", "D"] = 100
 
-emissionParameters(emission_regression_coefficients, model$data_list$individual_1$explanatory_variables[100,])
+emissionParameters(emission_regression_coefficients = emission_regression_coefficients,
+                   explanatory_variables = model$data_list$individual_1$explanatory_variables)
 
-sample_one_emission <- function(emission_regression_coefficients, latent_state, explanatory_variable){
-  emission_parameters <- explanatory_variable[dimnames(emission_regression_coefficients)[[1]]] %*% emission_regression_coefficients[,,latent_state]
-  colnames(emission_parameters) <- dimnames(emission_regression_coefficients)[[2]]
-  if(latent_state =="D")return(c("death"= T, "sero"= NA, "pcr"= NA, "body_temp" = NA))
-  res <- c("death"= F, "sero"= NA, "pcr"= NA, "body_temp" = NA)
-  if(runif(1)>.0){
-    res["sero"] <- rbinom(1,1,softmax(emission_parameters[,"sero_logprob"])[2])
-    res["pcr"] <-  rbinom(1,1,softmax(emission_parameters[,"pcr_logprob"])[2])
+sampleOneEmission <- function(emission_parameter){
+  res <- c("death"= rbinom(1, 1, softmax(emission_parameter["death_obs_logprob"])[2]), "sero"= NA, "pcr"= NA, "body_temp" = NA)
+  if(runif(1)>1){
+    res["sero"] <- rbinom(1,1,softmax(emission_parameter["sero_logprob"])[2])
+    res["pcr"] <-  rbinom(1,1,softmax(emission_parameter["pcr_logprob"])[2])
   }
-  if(runif(1)>1.0){
-    res["body_temp"] <- rnorm(1, emission_parameters[,"body_temp_mean"], exp(emission_parameters[,"body_temp_logsd"]))
+  if(runif(1)>.3){
+    res["body_temp"] <- rnorm(1, emission_parameter["body_temp_mean"], exp(emission_parameter["body_temp_logsd"]))
   }
   return(res)
 }
 
-model <- sampleEmissions(model, emission_regression_coefficients, sample_one_emission)
+model <- sampleEmissions(model, emission_regression_coefficients, sampleOneEmission)
 dev.off()
 # plot(as.numeric(as.factor(sapply(model$data_list$individual_1$emissions, function(x)x[["death"]]))))
 # plot(as.numeric(as.factor(sapply(model$data_list$individual_4$emissions, function(x)x[["death"]]))))
@@ -156,7 +154,7 @@ model$emission_model$to_specify$emission_regression_coefficients_log_prior <- fu
   emission_regression_coefficients_sd[,"pcr_logprob",] <-   c(.01, .01, .01, .01)
   emission_regression_coefficients_mean[,"sero_logprob",] <-   c(-10,  10,  10,  0)
   emission_regression_coefficients_sd[,  "sero_logprob",] <-   c(.01, .01, .01, .01)
-  emission_regression_coefficients_mean[,"body_temp_mean",] <-   c(37, 39, 37, 0)
+  emission_regression_coefficients_mean[,"body_temp_mean",] <-   c(37, 39, 37, -100)
   emission_regression_coefficients_sd[,  "body_temp_mean",] <-   c(.1, .5, .1, .01)
   emission_regression_coefficients_mean[,"body_temp_logsd",] <-   c(-1, -1, -1, -100)
   emission_regression_coefficients_sd[,  "body_temp_logsd",] <-   c( 1,  1,  1,  .01)
@@ -215,7 +213,6 @@ model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY = fun
     grad["body_temp_mean"]  <- z / sd^2
     grad["body_temp_logsd"] <- z^2 / sd^2 - 1
   }
-
   grad
 }
 
@@ -232,10 +229,12 @@ latent_state = "S"
 return_logprob_history = T
 
 source("R/forward.R")
-test <- forward(emission_model = model$emission_model, transition_model = model$transition_model,
-                data_seq = model$data_list$individual_1,
-                emission_regression_coefficients = emission_regression_coefficients,
-                transition_parameters = transition_parameters, return_logprob_history = T)
+test <- forward(
+  emission_model = model$emission_model, transition_model = model$transition_model,
+  data_seq = model$data_list$individual_1,
+  emission_regression_coefficients = emission_regression_coefficients,
+  transition_parameters = transition_parameters, return_logprob_history = T
+)
 
 filtering_probs <- filteringProbs(logprob_history = test$logprob_history)
 plot(col(filtering_probs),
@@ -243,4 +242,3 @@ plot(col(filtering_probs),
      col = row(filtering_probs), pch = ".", cex = 2,
      xlab = "time", ylab = "filtering probabilities")
 legend("bottomright", fill = seq(nrow(filtering_probs)), legend = row.names(filtering_probs))
-

@@ -12,13 +12,6 @@ softmax = function(x){
 
 normalize = function(x){x / sum(x)}
 
-emissionParameters <- function(emission_regression_coefficients, explanatory_variables){
-  res <- apply(
-    emission_regression_coefficients, 3,
-    function(x)explanatory_variables[dimnames(emission_regression_coefficients)[[1]]] %*% x)
-  row.names(res) <- dimnames(emission_regression_coefficients)[[2]]
-  res
-}
 
 # addProbs(log(.5), log(.5)) - log(1)
 # addProbs(log(.25), log(.25)) - log(.5)

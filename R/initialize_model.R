@@ -119,61 +119,78 @@ initializeStep5 = function(model, n_tests = 5, seed = 1){
     }
   }
 
-  # getting finite difference approximation of gradient
-  emissionLogLikFiniteDiff <- getFiniteDiffGradEmissionLL(model$emission_model$to_specify$emission_log_likelihood)
-  gradient_check_ratio = list()
   # testing that the emission function is right
-  message("Testing emission log density and prior")
+  message("Testing emission parameters prior, emission log likelihood, and its gradient if provided")
   set.seed(1)
+  # creating random valued regression coefficients for the emission parameters
+  # and testing the prior
   for(test_idx in seq(n_tests)){
-    # creating random valued regression coefficients for the emission parameters
     emission_regression_coefficients <- createRandomEmissionCoeffs(
       emission_parameters = model$emission_model$dont_touch$emission_parameters_names,
       explanatory_variables = model$emission_model$dont_touch$emission_explanatory_variables,
       latent_states = model$transition_model$latent_states)
-    # evaluating and checking prior
     prior_eval <- model$emission_model$to_specify$emission_regression_coefficients_log_prior(emission_regression_coefficients)
     if(!is.numeric(prior_eval)|length(prior_eval)>1)stop("The emission log prior should return a numeric of length 1")
+  }
+  # creating random valued emission parameters,
+  # and testing the log likelihood and its gradient
+  # creating emission gradient
+  emissionLogLikFiniteDiff <- getFiniteDiffGradEmissionLL(model$emission_model$to_specify$emission_log_likelihood)
+  N <- sum(sapply(model$data_list, function(x)length(x$emissions)))
+  gradient_check <- matrix(0, n_tests * N, model$emission_model$dont_touch$number_emission_parameters)
+  i = 0
+  colnames(gradient_check) <- model$emission_model$dont_touch$emission_parameters_names
+  for(test_idx in seq(n_tests)){
+    test_emission_parameters <- rnorm(
+      model$emission_model$dont_touch$number_emission_parameters, 0, 10)
+    names(test_emission_parameters) <- model$emission_model$dont_touch$emission_parameters_names
     # looping over individuals and time periods
-    for(ind_idx in seq(length(model$data_list))){
+    for(ind_idx in seq_len(length(model$data_list))){
       for(time_idx in seq(length(model$data_list[[ind_idx]]$emissions))){
-        # creating emission parameters from explanatory variables
-        # emission_params <- emissionParameters(
-        #   explanatory_variables = model$data_list[[ind_idx]]$explanatory_variables[time_idx,],
-        #   emission_regression_coefficients)
-        # looping over latent states
-        for(latent_state_idx in seq(length(model$transition_model$latent_states))){
-          # evaluating likelihood
-          # likelihood_eval <-
-          #     model$emission_model$to_specify$emission_log_likelihood(
-          #       emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
-          #       emission_parameters_vector = emission_params[,latent_state_idx]
-          #     )
-          # if(!is.numeric(likelihood_eval)|length(likelihood_eval)>1)stop("The emission log likelihood should return a numeric of length 1")
-          # evaluating gradient
-          # if(is.function(model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY)){
-          #   analytic_grad <- model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY(
-          #     emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
-          #     emission_params[,latent_state_idx])
-          #   if(!is.numeric(analytic_grad))stop("The analytic gradient must return a numeric vector")
-          #   if(!identical(names(analytic_grad), model$emission_model$dont_touch$emission_parameters_names)){
-          #     stop(paste("The analytic gradient must return a named vector, whose names are the emission parameters:",
-          #                Reduce(paste, model$emission_model$dont_touch$emission_parameters_names)))
-          #   }
-          #   finite_diff_grad <- emissionLogLikFiniteDiff(
-          #     emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
-          #     emission_params[,latent_state_idx])$grad
-          #   gradient_check_ratio <- c(
-          #     gradient_check_ratio,
-          #     (finite_diff_grad - analytic_grad)/finite_diff_grad
-          #   )
-          # }
+        i = i+1
+        # evaluating likelihood
+        likelihood_eval <-
+          model$emission_model$to_specify$emission_log_likelihood(
+            emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
+            emission_parameters_vector = test_emission_parameters
+          )
+        if(!is.numeric(likelihood_eval)|length(likelihood_eval)>1)stop("The emission log likelihood should return a numeric of length 1")
+        # evaluating gradient
+        if(is.function(model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY)){
+          analytic_grad <- model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY(
+            emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
+            test_emission_parameters)
+          finite_diff_grad <- emissionLogLikFiniteDiff(
+            emission = model$data_list[[ind_idx]]$emissions[[time_idx]],
+            test_emission_parameters)
+          if(!is.numeric(analytic_grad))stop("The analytic gradient must return a numeric vector")
+          if(!identical(names(analytic_grad), model$emission_model$dont_touch$emission_parameters_names)){
+            stop(paste("The analytic gradient must return a named vector, whose names are the emission parameters:",
+                       Reduce(paste, model$emission_model$dont_touch$emission_parameters_names)))
+          }
+          gradient_check[i, ] <- (analytic_grad - finite_diff_grad)/(finite_diff_grad+1e-6)
         }
       }
     }
   }
+  # printing results of gradient check vs finite diff
+  if(is.function(model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY)){
+    message("Distributions of relative difference between finite difference and analytic gradients")
+    gradient_check <- apply(gradient_check, 2, function(x)quantile(x, c(0, .025, .1, .5, .9, .975, 1)))
+    gradient_check <- round(gradient_check, 3)
+    print(gradient_check)
+  }
+  if(!is.function(model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY)){
+    model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY <-
+      emissionLogLikFiniteDiff
+  }
   model$emission_model = c(
-    model$emission_model$to_specify,
+    emission_regression_coefficients_log_prior =
+      model$emission_model$to_specify$emission_regression_coefficients_log_prior,
+    emission_log_likelihood =
+      model$emission_model$to_specify$emission_log_likelihood,
+    emission_log_likelihood_grad =
+      model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY,
     model$emission_model$dont_touch)
   message("Last step of model initialization done, ready for fit.")
   return(model)

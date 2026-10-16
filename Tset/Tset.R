@@ -7,10 +7,9 @@ source("R/emission_model.R")
 source("R/utils.R")
 source("R/simulate_data.R")
 source("R/plot.R")
-source("R/forward.R")
 
 # list of data without proper emissions ####
-seq_length = 2000
+seq_length <- 2000
 temperature_series = 20 + 4 * GpGp::fast_Gp_sim(covparms = c(1,10,1.5, 0), locs = cbind(seq(seq_length), 1), m = 5) + 3 * rnorm(seq_length) + 12 * sin(seq(seq_length)*2*pi/365)
 individual <- list(
   explanatory_variables = matrix(cbind(temperature_series), ncol= 1, dimnames = list(NULL, c("day_temperature")) ),
@@ -71,15 +70,15 @@ model = initializeStep4(model)
 transition_parameters = createTransitionParameters(model = model)
 
 transition_parameters$S[,"Intercept","I"] <- -4
-transition_parameters$S[,"Intercept","D"] <- -10
+transition_parameters$S[,"Intercept","D"] <- -20
 transition_parameters$S[,"day_temperature","I"] <- -.2
 transition_parameters$S[,"day_temperature","D"] <- 0
 
 transition_parameters$I[,"Intercept","R"] <- c(-10,-6,0,3)
-transition_parameters$I[,"Intercept","D"] <- c(-4,-4,-10,-10)
+transition_parameters$I[,"Intercept","D"] <- c(-6,-6,-20,-20)
 
 transition_parameters$R[,"Intercept","S"] <- c(-6,-5,-5,-4)
-transition_parameters$R[,"Intercept","D"] <- c(-10,-10,-10,-10)
+transition_parameters$R[,"Intercept","D"] <- c(-20,-20,-20,-20)
 
 model <- sampleLatentState(model = model, transition_parameters = transition_parameters, initial_state = "S")
 plotLatentState(model, 1)
@@ -99,8 +98,8 @@ emission_regression_coefficients = createRandomEmissionCoeffs(
 
 emission_regression_coefficients["Intercept","pcr_logprob",       "S"] = -10
 emission_regression_coefficients["Intercept","sero_logprob",      "S"] = -10
-emission_regression_coefficients["Intercept","body_temp_mean",    "S"] = 37
-emission_regression_coefficients["Intercept","body_temp_logsd",   "S"] = -3
+emission_regression_coefficients["Intercept","body_temp_mean",    "S"] = 37.2
+emission_regression_coefficients["Intercept","body_temp_logsd",   "S"] = -4
 emission_regression_coefficients["Intercept","death_obs_logprob", "S"] = -100
 
 emission_regression_coefficients["Intercept","pcr_logprob",       "R"] = emission_regression_coefficients["Intercept","pcr_logprob",    "S"]
@@ -111,8 +110,8 @@ emission_regression_coefficients["Intercept","death_obs_logprob", "R"] = emissio
 
 emission_regression_coefficients["Intercept","pcr_logprob",       "I"] = 10
 emission_regression_coefficients["Intercept","sero_logprob",      "I"] = 10
-emission_regression_coefficients["Intercept","body_temp_mean",    "I"] = 39
-emission_regression_coefficients["Intercept","body_temp_logsd",   "I"] = -2
+emission_regression_coefficients["Intercept","body_temp_mean",    "I"] = 38
+emission_regression_coefficients["Intercept","body_temp_logsd",   "I"] = -1
 emission_regression_coefficients["Intercept","death_obs_logprob", "I"] = emission_regression_coefficients["Intercept","death_obs_logprob",  "S"]
 
 emission_regression_coefficients["Intercept","pcr_logprob",       "D"] = -100
@@ -130,7 +129,7 @@ sampleOneEmission <- function(emission_parameter){
     res["sero"] <- rbinom(1,1,softmax(emission_parameter["sero_logprob"])[2])
     res["pcr"] <-  rbinom(1,1,softmax(emission_parameter["pcr_logprob"])[2])
   }
-  if(runif(1)>.3){
+  if(runif(1)>.0){
     res["body_temp"] <- rnorm(1, emission_parameter["body_temp_mean"], exp(emission_parameter["body_temp_logsd"]))
   }
   return(res)
@@ -216,9 +215,8 @@ model$emission_model$to_specify$emission_log_likelihood_grad_NOT_MANDATORY = fun
   grad
 }
 
-t1 <- Sys.time()
 model = initializeStep5(model)
-print(Sys.time()-t1)
+
 
 emission_model <- model$emission_model
 transition_model <- model$transition_model
@@ -228,17 +226,92 @@ time_idx = 1
 latent_state = "S"
 return_logprob_history = T
 
+
+
+
 source("R/forward.R")
-test <- forward(
+Rcpp::sourceCpp("src/update_filtering.cpp")
+
+test1 <- forwardCpp(
   emission_model = model$emission_model, transition_model = model$transition_model,
   data_seq = model$data_list$individual_1,
   emission_regression_coefficients = emission_regression_coefficients,
   transition_parameters = transition_parameters, return_logprob_history = T
 )
+# source("R/forward.R")
+# test <- forward_old(
+#   emission_model = model$emission_model, transition_model = model$transition_model,
+#   data_seq = model$data_list$individual_1,
+#   emission_regression_coefficients = emission_regression_coefficients,
+#   transition_parameters = transition_parameters, return_logprob_history = T
+# )
+# test1$filtering_log_probs$S - test$filtering_log_probs$S
+# test1$filtering_log_probs$I - test$filtering_log_probs$I
+# test1$filtering_log_probs$R - test$filtering_log_probs$R
 
-filtering_probs <- filteringProbs(logprob_history = test$logprob_history)
+
+filtering_probs <- filteringProbs(logprob_history = test1$logprob_history)
 plot(col(filtering_probs),
      filtering_probs + .0025*row(filtering_probs),
      col = row(filtering_probs), pch = ".", cex = 2,
      xlab = "time", ylab = "filtering probabilities")
 legend("bottomright", fill = seq(nrow(filtering_probs)), legend = row.names(filtering_probs))
+
+
+Rcpp::sourceCpp("src/update_filtering.cpp")
+source("R/forward.R")
+
+paramLL(
+  emission_model = model$emission_model, transition_model = model$transition_model,
+  data_seq = model$data_list$individual_1,
+  emission_regression_coefficients = emission_regression_coefficients,
+  transition_parameters = transition_parameters
+)
+
+grad_combined <- paramLLGrad(
+  emission_model = model$emission_model, transition_model = model$transition_model,
+  data_seq = model$data_list$individual_1,
+  emission_regression_coefficients = emission_regression_coefficients,
+  transition_parameters = transition_parameters
+)
+grad_combined$grad
+
+
+
+eps <- 1e-6
+ll0 <- paramLL(
+  emission_model = model$emission_model, transition_model = model$transition_model,
+  data_seq = model$data_list$individual_1,
+  emission_regression_coefficients = emission_regression_coefficients,
+  transition_parameters = transition_parameters
+)
+
+gradient <- emission_regression_coefficients  # same dim (3-d)
+
+for (i in seq_len(dim(gradient)[1])) {
+  for (j in seq_len(dim(gradient)[2])) {
+    for (k in seq_len(dim(gradient)[3])) {
+      coefs_eps <- emission_regression_coefficients
+      coefs_eps[i, j, k] <- coefs_eps[i, j, k] + eps
+      ll_eps <- paramLL(
+        emission_model = model$emission_model, transition_model = model$transition_model,
+        data_seq = model$data_list$individual_1,
+        emission_regression_coefficients = coefs_eps,
+        transition_parameters = transition_parameters
+      )
+      coefs_eps <- emission_regression_coefficients
+      coefs_eps[i, j, k] <- coefs_eps[i, j, k] - eps
+      ll_eps_ <- paramLL(
+        emission_model = model$emission_model, transition_model = model$transition_model,
+        data_seq = model$data_list$individual_1,
+        emission_regression_coefficients = coefs_eps,
+        transition_parameters = transition_parameters
+      )
+
+      gradient[i, j, k] <- (ll_eps - ll_eps_) / (eps * 2)
+    }
+  }
+}
+
+plot(log(1+abs(grad_combined$grad)), log(1+abs(gradient)))
+abline(a=0, b=1)

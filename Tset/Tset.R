@@ -315,3 +315,4 @@ for (i in seq_len(dim(gradient)[1])) {
 
 plot(log(1+abs(grad_combined$grad)), log(1+abs(gradient)))
 abline(a=0, b=1)
+

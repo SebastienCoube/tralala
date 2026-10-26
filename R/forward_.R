@@ -333,7 +333,7 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
   log_probs <- initializeLogprobs(transition_model,
                                   emission_regression_coefficients, transition_parameters)
   # finite diff constant
-  finite_diff_constant <- 1e-6
+  finite_diff_constant <- 1e-3
   # looping over observations by chronological order
   for(time_idx in seq(n_time)){
     # 1 Updating current knowledge using the current emission log likelihood #####
@@ -394,6 +394,7 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
         end_idx <- endIdx(time_idx, depth)
         btf_knots <- transition_model$BTF_per_state[[latent_state]]
         transition_several(
+          latent_state_name = latent_state, eps = finite_diff_constant,
           # base
           filtering_log_probs = log_probs$base[[latent_state]],
           out_logprobs = out_log_probs$base[[latent_state]],
@@ -503,10 +504,11 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
   res$grad_emission <- (
     log_probs$emission_f - log_probs$emission_b
   )/(2*finite_diff_constant)
-  res$diff_transition_f <-
-    log_probs$transition_f
-  res$diff_transition_b <-
+  res$grad_transition <- mapply(
+    function(x, y)(x-y)/(2*finite_diff_constant),
+    log_probs$transition_f,
     log_probs$transition_b
+  )
   return(res)
 }
 

@@ -420,10 +420,10 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
   log_probs <- lapply(log_probs, function(x)abind::abind(x, along=1))
   res <- list()
   res$base <- sumLogProbs(log_probs$base)
-  res$grad <- (
+  res$grad_emission <- (
     apply(log_probs$emission_f, c(2,3,4), sumLogProbs)-
-      res$base
-  )/finite_diff_constant
+    apply(log_probs$emission_b, c(2,3,4), sumLogProbs)
+  )/(2*finite_diff_constant)
   return(res)
 }
 

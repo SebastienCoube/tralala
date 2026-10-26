@@ -151,6 +151,108 @@ void computeBtfTables(const NumericVector& transition_param,
 
 } // namespace
 
+// // [[Rcpp::export]]
+// void transition_several(
+//     SEXP filtering_log_probs,                 // double vector, MODIFIED IN PLACE
+//     SEXP out_logprobs,                        // double vector (length K-1), MODIFIED IN PLACE
+//     SEXP filtering_log_probs_emission_diff_f, // double array, dim[0] = length(filtering), MODIFIED IN PLACE
+//     SEXP filtering_log_probs_emission_diff_b, // same dim as _f, MODIFIED IN PLACE
+//     SEXP out_logprobs_emission_diff_f,        // double array, dim[0] = length(out), MODIFIED IN PLACE
+//     SEXP out_logprobs_emission_diff_b,        // same dim as out_..._f, MODIFIED IN PLACE
+//     const NumericVector& transition_param,    // transition_parameters[[latent_state]], array n_knots x p x (K-1)
+//     const NumericVector& explanatory_variable,// data_seq$explanatory_variables[time_idx, ]
+//     const IntegerVector& btf_knots,
+//     int depth,
+//     int last_idx) {                           // in [1, depth]; log-prob rows are visited
+//   // last_idx..1, then depth..last_idx+1
+//
+//   if (TYPEOF(filtering_log_probs) != REALSXP || TYPEOF(out_logprobs) != REALSXP ||
+//       TYPEOF(filtering_log_probs_emission_diff_f) != REALSXP ||
+//       TYPEOF(filtering_log_probs_emission_diff_b) != REALSXP ||
+//       TYPEOF(out_logprobs_emission_diff_f) != REALSXP ||
+//       TYPEOF(out_logprobs_emission_diff_b) != REALSXP)
+//     stop("all six in-place arguments must be double (not integer) objects");
+//
+//   if (depth < 1) stop("depth must be >= 1");
+//   if (last_idx < 1 || last_idx > depth) stop("last_idx must be between 1 and depth");
+//
+//   int K = 0;
+//   std::vector<double> vals, mult;
+//   computeBtfTables(transition_param, explanatory_variable, btf_knots, depth, K, vals, mult);
+//
+//   NumericVector filt(filtering_log_probs);
+//   NumericVector out(out_logprobs);
+//   if (filt.size() < depth) stop("filtering_log_probs is shorter than depth");
+//   if (out.size() != K - 1) stop("out_logprobs must have length K - 1 (dim(transition_param)[3])");
+//
+//   const R_xlen_t nrowF = filt.size(), nrowO = out.size();
+//   const R_xlen_t P = Rf_xlength(filtering_log_probs_emission_diff_f) / std::max<R_xlen_t>(nrowF, 1);
+//   if (Rf_xlength(filtering_log_probs_emission_diff_f) != nrowF * P ||
+//       Rf_xlength(filtering_log_probs_emission_diff_b) != nrowF * P ||
+//       Rf_xlength(out_logprobs_emission_diff_f)        != nrowO * P ||
+//       Rf_xlength(out_logprobs_emission_diff_b)        != nrowO * P)
+//     stop("array sizes do not match: first dim must be length(filtering_log_probs) or "
+//            "length(out_logprobs), and trailing dims must be identical");
+//
+//   double* GF_f = REAL(filtering_log_probs_emission_diff_f);
+//   double* GF_b = REAL(filtering_log_probs_emission_diff_b);
+//   double* GO_f = REAL(out_logprobs_emission_diff_f);
+//   double* GO_b = REAL(out_logprobs_emission_diff_b);
+//
+//   std::vector<double> tr_prob(K), btf_mult(K, 1.0), ltr(K);
+//   for (int k = 0; k < K; ++k) tr_prob[k] = vals[k];            // row 0
+//
+//   for (int step = 0; step < depth; ++step) {
+//     // BTF indexation: unchanged (depth, depth-1, ..., 1)
+//     const int time_spent = depth - step;
+//
+//     int knot_match = -1;
+//     for (int j = 0; j < btf_knots.size(); ++j)
+//       if (btf_knots[j] == time_spent) { knot_match = j; break; }
+//
+//     if (knot_match >= 0) {
+//       for (int k = 0; k < K; ++k) tr_prob[k] = vals[static_cast<size_t>(knot_match) * K + k];
+//       if (time_spent > 1) {
+//         if (knot_match < 1 || mult.empty())
+//           stop("btf_knots must be increasing and contain at least 2 knots when depth > 1");
+//         for (int k = 0; k < K; ++k)
+//           btf_mult[k] = mult[static_cast<size_t>(knot_match - 1) * K + k];
+//       }
+//     } else {
+//       double s = 0.0;
+//       for (int k = 0; k < K; ++k) { tr_prob[k] *= btf_mult[k]; s += tr_prob[k]; }
+//       for (int k = 0; k < K; ++k) tr_prob[k] /= s;
+//     }
+//     for (int k = 0; k < K; ++k) ltr[k] = std::log(tr_prob[k]);
+//
+//     // Log-prob row: last_idx, last_idx-1, ..., 1, depth, depth-1, ..., last_idx+1
+//     int idx = (last_idx - 1 - step) % depth;
+//     if (idx < 0) idx += depth;
+//     const int row = idx;            // 0-based row = (1-based index) - 1
+//
+//     // vector part
+//     const double f = filt[row];
+//     for (int k = 1; k < K; ++k)
+//       out[k - 1] = addLogProbs(out[k - 1], f + ltr[k]);
+//
+//     // array part
+//     for (R_xlen_t c = 0; c < P; ++c) {
+//       const double ff = GF_f[row + nrowF * c];
+//       const double fb = GF_b[row + nrowF * c];
+//       for (int k = 1; k < K; ++k) {
+//         double& of = GO_f[(k - 1) + nrowO * c];
+//         double& ob = GO_b[(k - 1) + nrowO * c];
+//         of = addLogProbs(of, ff + ltr[k]);
+//         ob = addLogProbs(ob, fb + ltr[k]);
+//       }
+//       GF_f[row + nrowF * c] = ff + ltr[0];
+//       GF_b[row + nrowF * c] = fb + ltr[0];
+//     }
+//
+//     filt[row] = f + ltr[0];
+//   }
+// }
+
 // [[Rcpp::export]]
 void transition_several(
     SEXP filtering_log_probs,                 // double vector, MODIFIED IN PLACE
@@ -159,6 +261,10 @@ void transition_several(
     SEXP filtering_log_probs_emission_diff_b, // same dim as _f, MODIFIED IN PLACE
     SEXP out_logprobs_emission_diff_f,        // double array, dim[0] = length(out), MODIFIED IN PLACE
     SEXP out_logprobs_emission_diff_b,        // same dim as out_..._f, MODIFIED IN PLACE
+    SEXP filtering_log_probs_transition_diff_f, // named list of double arrays, MODIFIED IN PLACE
+    SEXP filtering_log_probs_transition_diff_b, // named list of double arrays, MODIFIED IN PLACE
+    SEXP out_logprobs_transition_diff_f,        // named list of double arrays, MODIFIED IN PLACE
+    SEXP out_logprobs_transition_diff_b,        // named list of double arrays, MODIFIED IN PLACE
     const NumericVector& transition_param,    // transition_parameters[[latent_state]], array n_knots x p x (K-1)
     const NumericVector& explanatory_variable,// data_seq$explanatory_variables[time_idx, ]
     const IntegerVector& btf_knots,
@@ -199,6 +305,33 @@ void transition_several(
   double* GO_f = REAL(out_logprobs_emission_diff_f);
   double* GO_b = REAL(out_logprobs_emission_diff_b);
 
+  // ---- transition-diff lists: loop over the names of the filtering _f list, ----
+  // ---- each array is fetched by name in the four lists (no other assumption) ----
+  struct TransEntry {
+    double* Ff; double* Fb;   // filtering-like arrays, nrowF x Pt
+    double* Of; double* Ob;   // out-like arrays, nrowO x Pt
+    R_xlen_t Pt;
+  };
+  std::vector<TransEntry> tr;
+  {
+    List lFf(filtering_log_probs_transition_diff_f);
+    List lFb(filtering_log_probs_transition_diff_b);
+    List lOf(out_logprobs_transition_diff_f);
+    List lOb(out_logprobs_transition_diff_b);
+    CharacterVector nms = lFf.names();
+    for (R_xlen_t i = 0; i < nms.size(); ++i) {
+      const std::string key = as<std::string>(nms[i]);
+      NumericVector aFf = lFf[key];
+      NumericVector aFb = lFb[key];
+      NumericVector aOf = lOf[key];
+      NumericVector aOb = lOb[key];
+      TransEntry e;
+      e.Ff = REAL(aFf); e.Fb = REAL(aFb); e.Of = REAL(aOf); e.Ob = REAL(aOb);
+      e.Pt = aFf.size() / nrowF;
+      tr.push_back(e);
+    }
+  }
+
   std::vector<double> tr_prob(K), btf_mult(K, 1.0), ltr(K);
   for (int k = 0; k < K; ++k) tr_prob[k] = vals[k];            // row 0
 
@@ -235,7 +368,7 @@ void transition_several(
     for (int k = 1; k < K; ++k)
       out[k - 1] = addLogProbs(out[k - 1], f + ltr[k]);
 
-    // array part
+    // emission-diff array part
     for (R_xlen_t c = 0; c < P; ++c) {
       const double ff = GF_f[row + nrowF * c];
       const double fb = GF_b[row + nrowF * c];
@@ -249,7 +382,23 @@ void transition_several(
       GF_b[row + nrowF * c] = fb + ltr[0];
     }
 
+    // transition-diff array part: exactly the same treatment, entry by entry
+    for (size_t t = 0; t < tr.size(); ++t) {
+      const TransEntry& e = tr[t];
+      for (R_xlen_t c = 0; c < e.Pt; ++c) {
+        const double ff = e.Ff[row + nrowF * c];
+        const double fb = e.Fb[row + nrowF * c];
+        for (int k = 1; k < K; ++k) {
+          double& of = e.Of[(k - 1) + nrowO * c];
+          double& ob = e.Ob[(k - 1) + nrowO * c];
+          of = addLogProbs(of, ff + ltr[k]);
+          ob = addLogProbs(ob, fb + ltr[k]);
+        }
+        e.Ff[row + nrowF * c] = ff + ltr[0];
+        e.Fb[row + nrowF * c] = fb + ltr[0];
+      }
+    }
+
     filt[row] = f + ltr[0];
   }
 }
-

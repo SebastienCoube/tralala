@@ -1,3 +1,4 @@
+#' @export
 plotLatentState <- function(model, ind_idx, add_time_spent = T){
   if(add_time_spent)par(mfrow = c(2,1))
   par(mar =c(2,1,3,1))

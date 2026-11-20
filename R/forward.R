@@ -1,6 +1,7 @@
+#' @export
 forwardR <- function(emission_model, transition_model, data_seq,
-                    emission_regression_coefficients, transition_parameters,
-                    return_logprob_history = FALSE){
+                     emission_regression_coefficients, transition_parameters,
+                     return_logprob_history = FALSE){
   n_time <- length(data_seq$emissions)
   # initializing log-probabilities
   filtering_log_probs <- lapply(
@@ -11,7 +12,7 @@ forwardR <- function(emission_model, transition_model, data_seq,
 
   # case when whole history of log-probabilities is needed
   if(return_logprob_history)logprob_history <-
-      lapply(filtering_log_probs, function(x)matrix(0, length(x), n_time))
+    lapply(filtering_log_probs, function(x)matrix(0, length(x), n_time))
 
   # Emission parameters depending on explanatory variables
   emission_parameters <-
@@ -127,9 +128,10 @@ forwardR <- function(emission_model, transition_model, data_seq,
   if(return_logprob_history)return(list(filtering_log_probs = filtering_log_probs, logprob_history = logprob_history))
 }
 
+#' @export
 forwardCpp <- function(emission_model, transition_model, data_seq,
-                    emission_regression_coefficients, transition_parameters,
-                    return_logprob_history = FALSE){
+                       emission_regression_coefficients, transition_parameters,
+                       return_logprob_history = FALSE){
   n_time <- length(data_seq$emissions)
   # initializing log-probabilities
   filtering_log_probs <- lapply(
@@ -140,7 +142,7 @@ forwardCpp <- function(emission_model, transition_model, data_seq,
 
   # case when whole history of log-probabilities is needed
   if(return_logprob_history)logprob_history <-
-      lapply(filtering_log_probs, function(x)matrix(0, length(x), n_time))
+    lapply(filtering_log_probs, function(x)matrix(0, length(x), n_time))
   # looping over observations by chronological order
   for(time_idx in seq(n_time)){
     # 1 Updating current knowledge using the current emission log likelihood #####
@@ -166,7 +168,7 @@ forwardCpp <- function(emission_model, transition_model, data_seq,
       # initializing outflow
       out_logprobs <- lapply(transition_model$misc$number_outstates, function(x){
         rep(-Inf, x)
-        })
+      })
       for(latent_state in transition_model$latent_states)names(out_logprobs[[latent_state]]) <-
           transition_model$misc$outstates[[latent_state]]
       # 2a updating the probabilities using the transition rules ####
@@ -183,7 +185,7 @@ forwardCpp <- function(emission_model, transition_model, data_seq,
         } else {
           matrix(0, 0, ncol(value_at_btf_knots))
         }
-        transition(
+        tralala::transition(
           filtering_log_probs[[latent_state]],   # modified in place
           out_logprobs[[latent_state]],          # modified in place
           value_at_btf_knots, btf_multiplicators, btf_knots, depth
@@ -223,6 +225,9 @@ forwardCpp <- function(emission_model, transition_model, data_seq,
                                         logprob_history = logprob_history))
 }
 
+endIdx <- function(time_idx, depth)(-(time_idx)) %% depth +1
+
+#' @export
 filteringProbs <- function(logprob_history){
   probs <- t(do.call(rbind, logprob_history))
   probs <- probs - apply(probs, 1, max)
@@ -240,8 +245,6 @@ initializeEmissionDiffLogprobs <-
     emission_diff <- lapply(
       filtering_log_probs, function(x)array(x, dim = c(length(x), dim(emission_regression_coefficients))))
     for(latent_state in transition_model$latent_states){
-      names(filtering_log_probs[[latent_state]]) <-
-        paste("lag", seq(length(filtering_log_probs[[latent_state]])), sep = "")
       dimnames(emission_diff[[latent_state]])[[1]] <-
         paste("lag", seq(length(filtering_log_probs[[latent_state]])), sep = "")
       dimnames(emission_diff[[latent_state]])[c(2,3,4)] <-
@@ -249,24 +252,37 @@ initializeEmissionDiffLogprobs <-
     }
     emission_diff
   }
-
-
-endIdx <- function(time_idx, depth)(-(time_idx)) %% depth +1
-
-# Initializers with emission and transition
+initializeTransitionDiffLogprobs <-
+  function(filtering_log_probs, transition_model, transition_parameters){
+    res <- lapply(
+      filtering_log_probs, function(filtering_log_probs){
+        lapply(transition_parameters, function(transition_parameter){
+          res <- array(
+            filtering_log_probs[1],
+            dim = c(length(filtering_log_probs), dim(transition_parameter)),
+            dimnames = c(list(names(filtering_log_probs)), dimnames(transition_parameter)))
+        })
+      })
+    res[which(sapply(res, length)==0)]<- NULL
+    res
+  }
 initializeLogprobs <-
   function(transition_model, emission_regression_coefficients,
            transition_parameters){
     # initializing log-probabilities
     filtering_log_probs <- lapply(
       transition_model$misc$depth,
-      function(x)log(rep(1/(x*model$transition_model$n_latent_states), x)))
-    # forward finite differences
-
+      function(x){
+        res <- log(rep(1/(x*model$transition_model$n_latent_states), x))
+        names(res) <- paste("lag", seq(length(res)))
+        res
+      })
     return(list(
       base = filtering_log_probs,
       emission_f = initializeEmissionDiffLogprobs(filtering_log_probs, transition_model, emission_regression_coefficients),
-      emission_b = initializeEmissionDiffLogprobs(filtering_log_probs, transition_model, emission_regression_coefficients)
+      emission_b = initializeEmissionDiffLogprobs(filtering_log_probs, transition_model, emission_regression_coefficients),
+      transition_f = initializeTransitionDiffLogprobs(filtering_log_probs, transition_model, transition_parameters),
+      transition_b = initializeTransitionDiffLogprobs(filtering_log_probs, transition_model, transition_parameters)
     ))
   }
 
@@ -276,26 +292,47 @@ initializeOutLogProbsEmission <- function(transition_model, emission_regression_
     dimnames(res)[[1]] <- x
     res
   })}
-
-initializeOutLogProbs <- function(transition_model, emission_regression_coefficients){
+initializeOutLogProbsTransition <- function(transition_model, transition_parameters){
+  res1 <- lapply(transition_model$misc$outstates, function(outstates){
+    res2 <- lapply(transition_parameters, function(transition_param){
+      res3 <- array(-Inf, dim = c(length(outstates), dim(transition_param)),
+                    dimnames = c(list(outstates), dimnames(transition_param)))
+    })
+  })
+}
+initializeOutLogProbs <- function(transition_model, emission_regression_coefficients, transition_parameters){
   # anything smarter causes mem issues
   return(list(
     base = lapply(transition_model$misc$outstates, function(x){
       sapply(x, function(x)-Inf)
     }),
     emission_f = initializeOutLogProbsEmission(transition_model, emission_regression_coefficients),
-    emission_b = initializeOutLogProbsEmission(transition_model, emission_regression_coefficients)
+    emission_b = initializeOutLogProbsEmission(transition_model, emission_regression_coefficients),
+    transition_f = initializeOutLogProbsTransition(transition_model, transition_parameters),
+    transition_b = initializeOutLogProbsTransition(transition_model, transition_parameters)
   ))
 }
 
+# transpose list names
+transpose_list <- function(l) {
+  inner_names <- names(l[[1]])
+  setNames(
+    lapply(inner_names, function(n) lapply(l, `[[`, n)),
+    inner_names)
+}
+
+
+
 # emission and transition grad
+#' @export
 paramLLGrad <- function(emission_model, transition_model, data_seq,
                         emission_regression_coefficients, transition_parameters){
   n_time <- length(data_seq$emissions)
   # initializing log probabilities
-  log_probs <- initializeLogprobs(transition_model, emission_regression_coefficients)
+  log_probs <- initializeLogprobs(transition_model,
+                                  emission_regression_coefficients, transition_parameters)
   # finite diff constant
-  finite_diff_constant <- 1e-6
+  finite_diff_constant <- 1e-3
   # looping over observations by chronological order
   for(time_idx in seq(n_time)){
     # 1 Updating current knowledge using the current emission log likelihood #####
@@ -310,15 +347,24 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
           emission = data_seq$emissions[[time_idx]],
           emission_parameters_vector = emission_parameters_vector
         )
+      # incrementing in base likelihood evaluation
       log_probs$base[[latent_state]] <-
+        # incrementing in difference with respect to transition parameters
         log_probs$base[[latent_state]] + emission_log_likelihood
+      for(latent_state_2 in transition_model$misc$non_absorbing_states) {
+        log_probs$transition_f[[latent_state]][[latent_state_2]] <-
+          log_probs$transition_f[[latent_state]][[latent_state_2]] + emission_log_likelihood
+        log_probs$transition_b[[latent_state]][[latent_state_2]] <-
+          log_probs$transition_b[[latent_state]][[latent_state_2]] + emission_log_likelihood
+      }
+      # incrementing in difference with respect to emission parameters
       log_probs$emission_f[[latent_state]][] <-
         log_probs$emission_f[[latent_state]][] +
         emission_log_likelihood
       log_probs$emission_b[[latent_state]][] <-
         log_probs$emission_b[[latent_state]][] +
         emission_log_likelihood
-      # supplementary increment for derivatives
+      # supplementary increment, just for difference with respect to emission parameters
       d_lik_d_emission_param <-
         finite_diff_constant *
         outer(
@@ -339,99 +385,132 @@ paramLLGrad <- function(emission_model, transition_model, data_seq,
       # initializing outflow
       out_log_probs <- initializeOutLogProbs(
         transition_model = transition_model,
-        emission_regression_coefficients = emission_regression_coefficients)
+        emission_regression_coefficients = emission_regression_coefficients,
+        transition_parameters = transition_parameters)
       # 2a updating the probabilities using the transition rules ####
       for(latent_state in transition_model$misc$non_absorbing_states) {
-        value_at_btf_knots <- valueAtBtfKnots(
-          explanatory_variable = data_seq$explanatory_variables[time_idx, ],
-          transition_param = transition_parameters[[latent_state]]
-        )
         depth <- transition_model$misc$depth[latent_state]
         end_idx <- endIdx(time_idx, depth)
         btf_knots <- transition_model$BTF_per_state[[latent_state]]
-        btf_multiplicators <- if (depth > 1) {
-          exp(-matrix(apply(log(value_at_btf_knots), 2, diff),
-                      nrow = nrow(value_at_btf_knots) - 1) / diff(btf_knots))
-        } else {
-          matrix(0, 0, ncol(value_at_btf_knots))
-        }
         transition_several(
+          latent_state_name = latent_state, eps = finite_diff_constant,
+          # base
           filtering_log_probs = log_probs$base[[latent_state]],
           out_logprobs = out_log_probs$base[[latent_state]],
+          # difference wrt emission
           filtering_log_probs_emission_diff_f = log_probs$emission_f[[latent_state]],
           out_logprobs_emission_diff_f =  out_log_probs$emission_f[[latent_state]],
           filtering_log_probs_emission_diff_b = log_probs$emission_b[[latent_state]],
           out_logprobs_emission_diff_b =  out_log_probs$emission_b[[latent_state]],
+          # difference wrt transition
+          filtering_log_probs_transition_diff_f = log_probs$transition_f[[latent_state]],
+          out_logprobs_transition_diff_f =  out_log_probs$transition_f[[latent_state]],
+          filtering_log_probs_transition_diff_b = log_probs$transition_b[[latent_state]],
+          out_logprobs_transition_diff_b =  out_log_probs$transition_b[[latent_state]],
+          # rest
           transition_param     = transition_parameters[[latent_state]],
           explanatory_variable = data_seq$explanatory_variables[time_idx, ],
           btf_knots            = as.integer(btf_knots),
           depth = depth, last_idx = end_idx
         )
       }
-      # 2b translating probabilities along time spent ####
-      for(latent_state in transition_model$latent_states){
-        depth <- transition_model$misc$depth[latent_state]
-        # excluding absorbing and simple Markov states
-        if(depth >1){
-          # adding penultimate probability to last probability
-          end_idx <- endIdx(time_idx, depth)
-          next_end_idx <- endIdx(time_idx + 1, depth)
-          log_probs$base[[latent_state]][next_end_idx] <-
-            addProbs(
-              log_probs$base[[latent_state]][next_end_idx],
-              log_probs$base[[latent_state]][end_idx])
-          log_probs$emission_f[[latent_state]][next_end_idx,,,] <-
-            addProbs(
-              log_probs$emission_f[[latent_state]][next_end_idx,,,],
-              log_probs$emission_f[[latent_state]][end_idx,,,])
-          log_probs$emission_b[[latent_state]][next_end_idx,,,] <-
-            addProbs(
-              log_probs$emission_b[[latent_state]][next_end_idx,,,],
-              log_probs$emission_b[[latent_state]][end_idx,,,])
-          # reinitializing (not first) end idx probability
-          log_probs$base[[latent_state]][end_idx] <- -Inf
-          log_probs$emission_f[[latent_state]][end_idx,,,] <- -Inf
-          log_probs$emission_b[[latent_state]][end_idx,,,] <- -Inf
-        }
-      }
+       # 2b translating probabilities along time spent ####
+       for(latent_state in transition_model$latent_states){
+         depth <- transition_model$misc$depth[latent_state]
+         # excluding absorbing and simple Markov states
+         if(depth >1){
+           end_idx <- endIdx(time_idx, depth)
+           next_end_idx <- endIdx(time_idx + 1, depth)
+           # adding penultimate probability to last probability
+           # base
+           log_probs$base[[latent_state]][next_end_idx] <-
+             addProbs(
+               log_probs$base[[latent_state]][next_end_idx],
+               log_probs$base[[latent_state]][end_idx])
+           # emission
+           log_probs$emission_f[[latent_state]][next_end_idx,,,] <-
+             addProbs(
+               log_probs$emission_f[[latent_state]][next_end_idx,,,],
+               log_probs$emission_f[[latent_state]][end_idx,,,])
+           log_probs$emission_b[[latent_state]][next_end_idx,,,] <-
+             addProbs(
+               log_probs$emission_b[[latent_state]][next_end_idx,,,],
+               log_probs$emission_b[[latent_state]][end_idx,,,])
+           # transition
+           for(latent_state_2 in transition_model$misc$non_absorbing_states){
+             log_probs$transition_f[[latent_state]][[latent_state_2]][next_end_idx,,,] <-
+               addProbs(
+                 log_probs$transition_f[[latent_state]][[latent_state_2]][next_end_idx,,,],
+                 log_probs$transition_f[[latent_state]][[latent_state_2]][end_idx,,,])
+             log_probs$transition_b[[latent_state]][[latent_state_2]][next_end_idx,,,] <-
+               addProbs(
+                 log_probs$transition_b[[latent_state]][[latent_state_2]][next_end_idx,,,],
+                 log_probs$transition_b[[latent_state]][[latent_state_2]][end_idx,,,])
+           }
+           # reinitializing (not first) end idx probability
+           # base
+           log_probs$base[[latent_state]][end_idx] <- -Inf
+           # emission
+           log_probs$emission_f[[latent_state]][end_idx,,,] <- -Inf
+           log_probs$emission_b[[latent_state]][end_idx,,,] <- -Inf
+           # transition
+           for(latent_state_2 in transition_model$misc$non_absorbing_states){
+            log_probs$transition_f[[latent_state]][[latent_state_2]][end_idx,,,] <- -Inf
+            log_probs$transition_b[[latent_state]][[latent_state_2]][end_idx,,,] <- -Inf
+           }
+         }
+       }
       # 2c transferring outflow to time spent = 1 ####
-      for(latent_state in transition_model$misc$non_absorbing_states){
-        for(exit_state in transition_model$misc$outstates[[latent_state]]){
+      for(origin_state in transition_model$misc$non_absorbing_states){
+        for(exit_state in transition_model$misc$outstates[[origin_state]]){
           end_idx <- endIdx(time_idx, transition_model$misc$depth[[exit_state]])
           log_probs$base[[exit_state]][end_idx] <-
             addProbs(
               log_probs$base[[exit_state]][end_idx],
-              out_log_probs$base[[latent_state]][exit_state]
+              out_log_probs$base[[origin_state]][exit_state]
             )
           log_probs$emission_f[[exit_state]][end_idx,,,] <-
             addProbs(
               log_probs$emission_f[[exit_state]][end_idx,,,],
-              out_log_probs$emission_f[[latent_state]][exit_state,,,]
+              out_log_probs$emission_f[[origin_state]][exit_state,,,]
             )
           log_probs$emission_b[[exit_state]][end_idx,,,] <-
             addProbs(
-              log_probs$emission_b[[exit_state]][1,,,],
-              out_log_probs$emission_b[[latent_state]][exit_state,,,]
+              log_probs$emission_b[[exit_state]][end_idx,,,],
+              out_log_probs$emission_b[[origin_state]][exit_state,,,]
             )
+          for(diff_state in transition_model$misc$non_absorbing_states){
+            log_probs$transition_f[[exit_state]][[diff_state]][end_idx,,,] <-
+              addProbs(
+                log_probs$transition_f[[exit_state]][[diff_state]][end_idx,,,],
+                out_log_probs$transition_f[[origin_state]][[diff_state]][exit_state,,,]
+              )
+            log_probs$transition_b[[exit_state]][[diff_state]][end_idx,,,] <-
+              addProbs(
+                log_probs$transition_b[[exit_state]][[diff_state]][end_idx,,,],
+                out_log_probs$transition_b[[origin_state]][[diff_state]][exit_state,,,]
+              )
+          }
         }
       }
     }
   }
-  log_probs <- lapply(log_probs, function(x)abind::abind(x, along=1))
+  log_probs$transition_f <- transpose_list(log_probs$transition_f)
+  log_probs$transition_b <- transpose_list(log_probs$transition_b)
+  log_probs <- collapseLogProbs(log_probs)
   res <- list()
-  res$base <- sumLogProbs(log_probs$base)
+  res$base <- log_probs$base
   res$grad_emission <- (
-    apply(log_probs$emission_f, c(2,3,4), sumLogProbs)-
-    apply(log_probs$emission_b, c(2,3,4), sumLogProbs)
+    log_probs$emission_f - log_probs$emission_b
   )/(2*finite_diff_constant)
+  res$grad_transition <- mapply(
+    function(x, y)(x-y)/(2*finite_diff_constant),
+    log_probs$transition_f,
+    log_probs$transition_b
+  )
   return(res)
 }
 
-sumLogProbs <- function(log_probs){
-  max_log_probs <- max(log_probs)
-  res <- log(sum(exp(log_probs-max_log_probs))) + max_log_probs
-  res
-}
 
 paramLL <- function(emission_model, transition_model, data_seq,
                     emission_regression_coefficients, transition_parameters){
@@ -440,3 +519,5 @@ paramLL <- function(emission_model, transition_model, data_seq,
                            return_logprob_history = FALSE))
   sumLogProbs(res)
 }
+
+

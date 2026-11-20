@@ -1,6 +1,7 @@
 
 
 
+#' @export
 sampleLatentState = function(model, transition_parameters, initial_state = NULL){
   # looping over individuals
   for(ind_idx in seq(length(model$data_list))){
@@ -61,6 +62,7 @@ sampleLatentState = function(model, transition_parameters, initial_state = NULL)
 
 
 
+#' @export
 sampleEmissions = function(model, emission_regression_coefficients, sampleOneEmission){
   for(ind_idx in seq(length(model$data_list))){
     emission_parameters <- emissionParameters(

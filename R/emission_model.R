@@ -1,6 +1,11 @@
 
-createRandomEmissionCoeffs <- function(
-    explanatory_variables, latent_states, emission_parameters){
+#' @export
+createEmissionCoeffs <- function(model){
+  where <- model$emission_model
+  if(!is.null(model$emission_model$dont_touch))where <- model$emission_model$dont_touch
+  emission_parameters <- where$emission_parameters_names
+  explanatory_variables <- where$emission_explanatory_variables
+  latent_states <- model$transition_model$latent_states
   res <- array(
     0,
     dim = sapply(list(
@@ -13,9 +18,17 @@ createRandomEmissionCoeffs <- function(
       emission_parameters,
       latent_states
     ))
+  res
+}
+
+#' @export
+createRandomEmissionCoeffs <- function(model){
+  res <- createEmissionCoeffs(model)
   res[] <- rnorm(length(res))
   res
 }
+
+
 
 
 # emission_log_likelihood <- function(emission, emission_parameters_vector)sum(emission*emission_parameters_vector)
@@ -43,6 +56,7 @@ getFiniteDiffGradEmissionLL <- function(emission_log_likelihood){
   return(finiteDiffGrad)
 }
 
+#' @export
 emissionParameters <- function(emission_regression_coefficients, explanatory_variables){
   apply(
     emission_regression_coefficients, 3,

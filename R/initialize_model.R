@@ -1,5 +1,6 @@
 
-# First step: Performing checks on the data and specifying latent sates names
+#' First step: Performing checks on the data and specifying latent sates names
+#' @export
 initializeStep1 = function(
     latent_states,
     data_list
@@ -19,6 +20,7 @@ initializeStep1 = function(
 }
 
 # Second step: Checking the transition matrix between states, and the bases of temporal functions
+#' @export
 initializeStep2 = function(model){
   # checking validity of transition matrix
   checkTransitionMat(model$transition_model)
@@ -33,6 +35,7 @@ initializeStep2 = function(model){
 }
 
 # Third step: interactions between explanatory variables and latent state transitions
+#' @export
 initializeStep3 = function(model){
   # processing some useful stuff
   model$transition_model = c(model$transition_model$dont_touch, model$transition_model$to_specify)
@@ -58,6 +61,33 @@ initializeStep3 = function(model){
   model$transition_model$misc$depth <- sapply(model$transition_model$BTF_per_state, max)
   model$transition_model$misc$BTFdim <- sapply(model$transition_model$BTF_per_state, length)
   model$transition_model$misc$BTFstepsize <- lapply(model$transition_model$BTF_per_state, diff)
+  model$transition_model$prior <- list()
+  model$transition_model$prior$transition_var <- 1
+  model$transition_model$prior$transition_correlation <- .9
+  model$transition_model$prior$precisions <- mapply(
+    btf_dim = model$transition_model$misc$BTFdim,
+    rest_dim = model$transition_model$misc$number_outstates * model$transition_model$misc$number_active_explanatory_variables,
+    function(btf_dim, rest_dim){
+      if(btf_dim * rest_dim ==0)return(NULL)
+      covmat <- matrix(0, btf_dim, btf_dim)
+      covmat[] <- model$transition_model$prior$transition_correlation; diag(covmat) <- 1
+      precision <- solve(covmat * model$transition_model$prior$transition_var)
+      precision <- diag(rep(1, rest_dim)) %x% precision
+      precision
+    }, SIMPLIFY = F)
+  if(any(which(sapply(model$transition_model$prior$precisions, is.null)))){
+    model$transition_model$prior$precisions[[which(sapply(model$transition_model$prior$precisions, is.null))]] <- NULL
+  }
+  model$transition_model$prior$evaluation <- function(transition_parameters, precisions){
+    sum(mapply(function(x, p){
+      -.5*sum((as.vector(x)%*%p)*as.vector(x))
+      },
+      transition_parameters, precisions))
+  }
+  model$transition_model$prior$gradient <- function(transition_parameters, precisions){
+    mapply(function(x, p){
+      drop(-(p %*% as.vector(x)))}, transition_parameters, precisions)
+  }
   emission_explanatory_variables = sapply(model$transition_model$explanatory_variable_names, function(X)FALSE)
   emission_explanatory_variables[1] = TRUE
   model$emission_model = list(
@@ -72,6 +102,7 @@ initializeStep3 = function(model){
 }
 
 # Fourth step: checking emission parameters names and explanatory variables
+#' @export
 initializeStep4 = function(model){
   # Checking emission parameters names
   if(!all(is.character(model$emission_model$to_specify$emission_parameters_names))){
@@ -86,10 +117,7 @@ initializeStep4 = function(model){
     emission_log_likelihood =                    "function(emission, emission_parameters_vector)",
     emission_log_likelihood_grad_NOT_MANDATORY = "function(emission, emission_parameters_vector)",
     emission_regression_coefficients_log_prior = "function(emission_regression_coefficients)",
-    regression_coefficients_array_NOFILL = createRandomEmissionCoeffs(
-      emission_parameters = model$emission_model$dont_touch$emission_parameters_names,
-      explanatory_variables = model$emission_model$dont_touch$emission_explanatory_variables,
-      latent_states = model$transition_model$latent_states)
+    regression_coefficients_array_NOFILL = createRandomEmissionCoeffs(model)
   )
   message(
     "Fourth step of model initialization done.\nGo to <your model>$emission_model$to_specify and modify what needs be.\nThen run initializeStep5."
@@ -99,6 +127,7 @@ initializeStep4 = function(model){
 
 
 # Fifth step: checking expected return of the emission likelihood and prior
+#' @export
 initializeStep5 = function(model, n_tests = 5, seed = 1){
   # checking arguments of emission prior and ll
   if(formalArgs(model$emission_model$to_specify$emission_regression_coefficients_log_prior)!="emission_regression_coefficients")stop("Emission log-prior must have `emission_regression_coefficients` as argument")
@@ -125,10 +154,7 @@ initializeStep5 = function(model, n_tests = 5, seed = 1){
   # creating random valued regression coefficients for the emission parameters
   # and testing the prior
   for(test_idx in seq(n_tests)){
-    emission_regression_coefficients <- createRandomEmissionCoeffs(
-      emission_parameters = model$emission_model$dont_touch$emission_parameters_names,
-      explanatory_variables = model$emission_model$dont_touch$emission_explanatory_variables,
-      latent_states = model$transition_model$latent_states)
+    emission_regression_coefficients <- createRandomEmissionCoeffs(model)
     prior_eval <- model$emission_model$to_specify$emission_regression_coefficients_log_prior(emission_regression_coefficients)
     if(!is.numeric(prior_eval)|length(prior_eval)>1)stop("The emission log prior should return a numeric of length 1")
   }

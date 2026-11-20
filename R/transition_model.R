@@ -43,6 +43,7 @@ beginTransitionModel = function(
 # makeBTF(3)
 # makeBTF(c(6, 3))
 
+#' @export
 makeBTF = function(breakpoints = NULL, name = NULL){
   if(!is.null(breakpoints)){
     if(
@@ -54,6 +55,7 @@ makeBTF = function(breakpoints = NULL, name = NULL){
 }
 
 #' plotBTF(makeBTF(c(3, 10, 100, 1000)))
+#' @export
 plotBTF = function(BTF, log.x = T){
   if(!is.null(BTF)){
 
@@ -223,6 +225,7 @@ continueTransitionModel = function(transition_model){
   transition_model
 }
 
+#' @export
 plotTransitionGraph = function(model){
   g = model$transition_model$possible_transitions
   if(is.null(g))g = model$transition_model$dont_touch$possible_transitions
@@ -248,6 +251,7 @@ createExplanatoryVariablesEffects = function(transition_model){
   return(transition_model)
 }
 
+#' @export
 createTransitionParameters <- function(model){
   res <- list()
   for(latent_state in model$transition_model$misc$non_absorbing_states){

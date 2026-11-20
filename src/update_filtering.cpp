@@ -4,13 +4,17 @@
 #include <string>
 #include <vector>
 using namespace Rcpp;
+// [[Rcpp::plugins(openmp)]]
 
 // log(exp(a) + exp(b)), stable. Returns -Inf when both are -Inf (the R version gives NaN).
+
 inline double addLogProbs(double a, double b) {
-  double m = std::max(a, b);
-  return std::log(std::exp(a - m) + std::exp(b - m)) + m;
+  if (a < b) std::swap(a, b);            // a >= b
+  if (b == -INFINITY) return a;          // also covers both -Inf
+  return a + std::log1p(std::exp(b - a));
 }
 
+//' @export
 // [[Rcpp::export]]
 void transition(SEXP filtering_log_probs,              // double vector, MODIFIED IN PLACE
                           SEXP out_logprobs,                     // double vector (length K-1), MODIFIED IN PLACE
@@ -165,9 +169,36 @@ void matchExplanatory(const NumericVector& transition_param,
     }
   }
 
+  // A "segment" is a maximal run of steps governed by the same knot match:
+  // it starts at the step where knot m matches (m = -1 for the initial run of steps
+  // before any knot matches) and ends right before the next match.
+  struct Seg { int start; int end; int m; };
+
+  // Processes one column of the four arrays for all steps. Column-by-column access keeps the
+  // column (nrowF / nrowO contiguous doubles) in cache. lf / lb are depth x K tables of
+  // log transition probabilities (step-major) used for the _f and _b arrays.
+  inline void processColumn(const int* rows, int depth, int K,
+                            double* Ff, double* Fb, double* Of, double* Ob,
+                            const double* lf, const double* lb) {
+    for (int s = 0; s < depth; ++s) {
+      const int row = rows[s];
+      const double ff = Ff[row];
+      const double fb = Fb[row];
+      const double* a = lf + static_cast<size_t>(s) * K;
+      const double* b = lb + static_cast<size_t>(s) * K;
+      for (int k = 1; k < K; ++k) {
+        Of[k - 1] = addLogProbs(Of[k - 1], ff + a[k]);
+        Ob[k - 1] = addLogProbs(Ob[k - 1], fb + b[k]);
+      }
+      Ff[row] = ff + a[0];
+      Fb[row] = fb + b[0];
+    }
+  }
+
 } // namespace
 
 
+//' @export
 // [[Rcpp::export]]
 void transition_several(
     SEXP filtering_log_probs,                   // double vector, MODIFIED IN PLACE
@@ -207,7 +238,6 @@ void transition_several(
   const int nk = INTEGER(dimS)[0];
   const int p  = INTEGER(dimS)[1];
   const int m  = K - 1;
-  const bool has_mult = !mult.empty();
 
   NumericVector filt(filtering_log_probs);
   NumericVector out(out_logprobs);
@@ -236,7 +266,7 @@ void transition_several(
     bool target;              // true if name == latent_state_name
   };
   std::vector<TransEntry> tr;
-  R_xlen_t n_target = 0;       // number of components Pt of the target entry
+  R_xlen_t n_target = 0;
   bool found_target = false;
   {
     List lFf(filtering_log_probs_transition_diff_f);
@@ -268,21 +298,89 @@ void transition_several(
     stop("the array for '%s' must have as many columns (%d) as length(transition_param) (%d)",
          latent_state_name.c_str(), (int) n_target, (int) transition_param.size());
 
-  // ---- perturbed BTF quantities for the target entry (chain rule: only knot i changes) ----
-  // Column c of the target arrays <-> transition_param[i, j, kk] with c = i + nk*(j + p*kk)
-  // (column-major, as R flattens the trailing dimensions).
-  // For direction d = 0 (_f: +eps) and d = 1 (_b: -eps), only the following change:
-  //   - the probabilities at knot i              : pv
-  //   - mult between knots (i-1, i)  [index i-1] : pmLo   (if i >= 1)
-  //   - mult between knots (i, i+1)  [index i]   : pmHi   (if i <= nk-2)
-  // Everything else is shared with the unperturbed tables.
-  const R_xlen_t Pt = n_target;
-  const size_t stride = static_cast<size_t>(K);
-  std::vector<double> pv(Pt * 2 * stride), pmLo(Pt * 2 * stride, 1.0), pmHi(Pt * 2 * stride, 1.0);
-  std::vector<double> trP(Pt * 2 * stride), bmP(Pt * 2 * stride, 1.0), ltrP(Pt * 2 * stride);
+  // ======================================================================================
+  // Step 1: unperturbed trajectory, computed ONCE for all steps and all columns.
+  //   rows[s]        : 0-based row of the log-prob vectors visited at step s
+  //   ltrT[s*K + k]  : log transition probability at step s (step-major)
+  //   segs           : segments of steps governed by the same knot match
+  // All checks that can stop() happen here, before anything is modified in place.
+  // ======================================================================================
+  std::vector<int> rows(depth);
+  std::vector<double> ltrT(static_cast<size_t>(depth) * K);
+  std::vector<Seg> segs;
   {
-    // unperturbed linear predictors at every knot
-    std::vector<double> etaKnot(static_cast<size_t>(nk) * m);
+    std::vector<double> tr_prob(K), btf_mult(K, 1.0);
+    for (int k = 0; k < K; ++k) tr_prob[k] = vals[k];            // row 0
+    for (int step = 0; step < depth; ++step) {
+      const int time_spent = depth - step;
+
+      int knot_match = -1;
+      for (int j = 0; j < btf_knots.size(); ++j)
+        if (btf_knots[j] == time_spent) { knot_match = j; break; }
+
+      if (knot_match >= 0) {
+        for (int k = 0; k < K; ++k) tr_prob[k] = vals[static_cast<size_t>(knot_match) * K + k];
+        if (time_spent > 1) {
+          if (knot_match < 1 || mult.empty())
+            stop("btf_knots must be increasing and contain at least 2 knots when depth > 1");
+          for (int k = 0; k < K; ++k)
+            btf_mult[k] = mult[static_cast<size_t>(knot_match - 1) * K + k];
+        }
+        if (!segs.empty()) segs.back().end = step;
+        segs.push_back(Seg{step, depth, knot_match});
+      } else {
+        if (segs.empty()) segs.push_back(Seg{0, depth, -1});
+        double s = 0.0;
+        for (int k = 0; k < K; ++k) { tr_prob[k] *= btf_mult[k]; s += tr_prob[k]; }
+        for (int k = 0; k < K; ++k) tr_prob[k] /= s;
+      }
+      for (int k = 0; k < K; ++k)
+        ltrT[static_cast<size_t>(step) * K + k] = std::log(tr_prob[k]);
+
+      // Log-prob row: last_idx, last_idx-1, ..., 1, depth, depth-1, ..., last_idx+1
+      int idx = (last_idx - 1 - step) % depth;
+      if (idx < 0) idx += depth;
+      rows[step] = idx;
+    }
+  }
+
+  // ======================================================================================
+  // Step 2: vector part (sequential over steps; each row is visited exactly once).
+  // ======================================================================================
+  for (int s = 0; s < depth; ++s) {
+    const int row = rows[s];
+    const double* l = &ltrT[static_cast<size_t>(s) * K];
+    const double f = filt[row];
+    for (int k = 1; k < K; ++k)
+      out[k - 1] = addLogProbs(out[k - 1], f + l[k]);
+    filt[row] = f + l[0];
+  }
+
+  // ======================================================================================
+  // Step 3: emission-diff arrays, column by column, using the shared unperturbed table.
+  // ======================================================================================
+  for (R_xlen_t c = 0; c < P; ++c)
+    processColumn(rows.data(), depth, K,
+                  GF_f + nrowF * c, GF_b + nrowF * c, GO_f + nrowO * c, GO_b + nrowO * c,
+                  ltrT.data(), ltrT.data());
+
+  // ======================================================================================
+  // Step 4: transition-diff arrays.
+  //   - name != latent_state_name : same shared table as the emission arrays.
+  //   - name == latent_state_name : column c <-> transition_param[i,j,kk], c = i + nk*(j + p*kk).
+  //     Moving this coefficient by +eps (_f) / -eps (_b) changes only vals[i], hence only
+  //     mult[i-1] and mult[i]. The trajectory therefore differs from the unperturbed one
+  //     only on the segments
+  //        * m == i      (whole segment: start probabilities vals[i] and multiplier mult[i-1])
+  //        * m == i + 1  (non-match steps: multiplier mult[i])
+  //        * the initial segment (m == -1) when i == 0 (it uses row 0 of vals)
+  //     On every other step the shared unperturbed table is reused as is: scratch tables are
+  //     copies of ltrT in which only these segments are overwritten (and restored afterwards).
+  // ======================================================================================
+  std::vector<double> etaKnot, scrF, scrB;
+  std::vector<std::vector<int>> segsOf;           // segsOf[i] = indices (in segs) affected by knot i
+  {
+    etaKnot.assign(static_cast<size_t>(nk) * m, 0.0);
     for (int i = 0; i < nk; ++i)
       for (int k = 0; k < m; ++k) {
         double s = 0.0;
@@ -291,137 +389,94 @@ void transition_several(
         * explanatory_variable[xi[j]];
         etaKnot[static_cast<size_t>(i) * m + k] = s;
       }
-    std::vector<double> eta(m);
-    for (R_xlen_t c = 0; c < Pt; ++c) {
-      const int i  = static_cast<int>(c % nk);
-      const int j  = static_cast<int>((c / nk) % p);
-      const int kk = static_cast<int>(c / (static_cast<R_xlen_t>(nk) * p));
-      const double xj = explanatory_variable[xi[j]];
-      for (int d = 0; d < 2; ++d) {
-        const double delta = (d == 0) ? eps : -eps;
-        for (int k = 0; k < m; ++k) eta[k] = etaKnot[static_cast<size_t>(i) * m + k];
-        eta[kk] += delta * xj;
-        double* pvc = &pv[(c * 2 + d) * stride];
-        softmaxRef(eta, K, pvc);
-        if (has_mult) {
-          if (i >= 1) {
-            const double dk = static_cast<double>(btf_knots[i] - btf_knots[i - 1]);
-            multFromRows(&vals[static_cast<size_t>(i - 1) * K], pvc, dk, K,
-                         &pmLo[(c * 2 + d) * stride]);
-          }
-          if (i + 1 < nk) {
-            const double dk = static_cast<double>(btf_knots[i + 1] - btf_knots[i]);
-            multFromRows(pvc, &vals[static_cast<size_t>(i + 1) * K], dk, K,
-                         &pmHi[(c * 2 + d) * stride]);
-          }
-        }
-        // initial state: row 0 of the (perturbed) vals table
-        const double* v0 = (i == 0) ? pvc : &vals[0];
-        for (int k = 0; k < K; ++k) trP[(c * 2 + d) * stride + k] = v0[k];
+    scrF = ltrT;
+    scrB = ltrT;
+    segsOf.assign(nk, std::vector<int>());
+    for (size_t q = 0; q < segs.size(); ++q) {
+      const int sm = segs[q].m;
+      if (sm == -1) segsOf[0].push_back(static_cast<int>(q));
+      else {
+        segsOf[sm].push_back(static_cast<int>(q));                     // m == i
+        if (sm >= 1) segsOf[sm - 1].push_back(static_cast<int>(q));    // m == i + 1
       }
     }
   }
 
-  std::vector<double> tr_prob(K), btf_mult(K, 1.0), ltr(K);
-  for (int k = 0; k < K; ++k) tr_prob[k] = vals[k];            // row 0
+  std::vector<double> eta(m), pv(K), pmLo(K), pmHi(K), t(K), bm(K);
 
-  for (int step = 0; step < depth; ++step) {
-    // BTF indexation: unchanged (depth, depth-1, ..., 1)
-    const int time_spent = depth - step;
+  for (size_t e_idx = 0; e_idx < tr.size(); ++e_idx) {
+    const TransEntry& e = tr[e_idx];
 
-    int knot_match = -1;
-    for (int j = 0; j < btf_knots.size(); ++j)
-      if (btf_knots[j] == time_spent) { knot_match = j; break; }
-
-    // ---- unperturbed trajectory (used by everything but the target entry) ----
-    if (knot_match >= 0) {
-      for (int k = 0; k < K; ++k) tr_prob[k] = vals[static_cast<size_t>(knot_match) * K + k];
-      if (time_spent > 1) {
-        if (knot_match < 1 || mult.empty())
-          stop("btf_knots must be increasing and contain at least 2 knots when depth > 1");
-        for (int k = 0; k < K; ++k)
-          btf_mult[k] = mult[static_cast<size_t>(knot_match - 1) * K + k];
-      }
-    } else {
-      double s = 0.0;
-      for (int k = 0; k < K; ++k) { tr_prob[k] *= btf_mult[k]; s += tr_prob[k]; }
-      for (int k = 0; k < K; ++k) tr_prob[k] /= s;
+    if (!e.target) {
+      for (R_xlen_t c = 0; c < e.Pt; ++c)
+        processColumn(rows.data(), depth, K,
+                      e.Ff + nrowF * c, e.Fb + nrowF * c, e.Of + nrowO * c, e.Ob + nrowO * c,
+                      ltrT.data(), ltrT.data());
+      continue;
     }
-    for (int k = 0; k < K; ++k) ltr[k] = std::log(tr_prob[k]);
 
-    // ---- perturbed trajectories, one per component c and direction d ----
-    for (R_xlen_t c = 0; c < Pt; ++c) {
-      const int i = static_cast<int>(c % nk);
+    for (R_xlen_t c = 0; c < e.Pt; ++c) {
+      const int i  = static_cast<int>(c % nk);
+      const int j  = static_cast<int>((c / nk) % p);
+      const int kk = static_cast<int>(c / (static_cast<R_xlen_t>(nk) * p));
+      const double xj = explanatory_variable[xi[j]];
+
       for (int d = 0; d < 2; ++d) {
-        const size_t off = (c * 2 + d) * stride;
-        double* t  = &trP[off];
-        double* bm = &bmP[off];
-        if (knot_match >= 0) {
-          const double* src = (knot_match == i) ? &pv[off]
-          : &vals[static_cast<size_t>(knot_match) * K];
-          for (int k = 0; k < K; ++k) t[k] = src[k];
-          if (time_spent > 1) {
-            const int a = knot_match - 1;           // mult index, between knots a and a+1
-            const double* ms = (a == i - 1) ? &pmLo[off]
-            : (a == i)     ? &pmHi[off]
-            : &mult[static_cast<size_t>(a) * K];
-            for (int k = 0; k < K; ++k) bm[k] = ms[k];
+        const double delta = (d == 0) ? eps : -eps;
+        double* scr = (d == 0) ? scrF.data() : scrB.data();
+
+        // perturbed knot probabilities and the two multipliers that involve knot i
+        for (int k = 0; k < m; ++k) eta[k] = etaKnot[static_cast<size_t>(i) * m + k];
+        eta[kk] += delta * xj;
+        softmaxRef(eta, K, pv.data());
+        if (!mult.empty()) {
+          if (i >= 1) {
+            const double dk = static_cast<double>(btf_knots[i] - btf_knots[i - 1]);
+            multFromRows(&vals[static_cast<size_t>(i - 1) * K], pv.data(), dk, K, pmLo.data());
           }
-        } else {
-          double s = 0.0;
-          for (int k = 0; k < K; ++k) { t[k] *= bm[k]; s += t[k]; }
-          for (int k = 0; k < K; ++k) t[k] /= s;
+          if (i + 1 < nk) {
+            const double dk = static_cast<double>(btf_knots[i + 1] - btf_knots[i]);
+            multFromRows(pv.data(), &vals[static_cast<size_t>(i + 1) * K], dk, K, pmHi.data());
+          }
         }
-        for (int k = 0; k < K; ++k) ltrP[off + k] = std::log(t[k]);
-      }
-    }
 
-    // Log-prob row: last_idx, last_idx-1, ..., 1, depth, depth-1, ..., last_idx+1
-    int idx = (last_idx - 1 - step) % depth;
-    if (idx < 0) idx += depth;
-    const int row = idx;            // 0-based row = (1-based index) - 1
-
-    // vector part
-    const double f = filt[row];
-    for (int k = 1; k < K; ++k)
-      out[k - 1] = addLogProbs(out[k - 1], f + ltr[k]);
-
-    // emission-diff array part
-    for (R_xlen_t c = 0; c < P; ++c) {
-      const double ff = GF_f[row + nrowF * c];
-      const double fb = GF_b[row + nrowF * c];
-      for (int k = 1; k < K; ++k) {
-        double& of = GO_f[(k - 1) + nrowO * c];
-        double& ob = GO_b[(k - 1) + nrowO * c];
-        of = addLogProbs(of, ff + ltr[k]);
-        ob = addLogProbs(ob, fb + ltr[k]);
-      }
-      GF_f[row + nrowF * c] = ff + ltr[0];
-      GF_b[row + nrowF * c] = fb + ltr[0];
-    }
-
-    // transition-diff array part:
-    //  - name != latent_state_name : same treatment as above (ltr)
-    //  - name == latent_state_name : column c uses the trajectory obtained by moving
-    //    transition_param[i,j,kk] by +eps (_f arrays) or -eps (_b arrays)
-    for (size_t t = 0; t < tr.size(); ++t) {
-      const TransEntry& e = tr[t];
-      for (R_xlen_t c = 0; c < e.Pt; ++c) {
-        const double* lf = e.target ? &ltrP[(c * 2    ) * stride] : ltr.data();
-        const double* lb = e.target ? &ltrP[(c * 2 + 1) * stride] : ltr.data();
-        const double ff = e.Ff[row + nrowF * c];
-        const double fb = e.Fb[row + nrowF * c];
-        for (int k = 1; k < K; ++k) {
-          double& of = e.Of[(k - 1) + nrowO * c];
-          double& ob = e.Ob[(k - 1) + nrowO * c];
-          of = addLogProbs(of, ff + lf[k]);
-          ob = addLogProbs(ob, fb + lb[k]);
+        // recompute the perturbed log table on the affected segments only
+        for (size_t u = 0; u < segsOf[i].size(); ++u) {
+          const Seg& sg = segs[segsOf[i][u]];
+          // starting state of the segment
+          if (sg.m == -1) {                                   // initial segment: row 0 of vals
+            const double* v0 = (i == 0) ? pv.data() : &vals[0];
+            for (int k = 0; k < K; ++k) { t[k] = v0[k]; bm[k] = 1.0; }
+          } else {
+            const double* v = (sg.m == i) ? pv.data() : &vals[static_cast<size_t>(sg.m) * K];
+            for (int k = 0; k < K; ++k) t[k] = v[k];
+            if (depth - sg.start > 1) {                        // time_spent > 1: multiplier is used
+              const double* ms = (sg.m == i) ? pmLo.data() : pmHi.data();   // m == i or i + 1
+              for (int k = 0; k < K; ++k) bm[k] = ms[k];
+            }
+          }
+          for (int s = sg.start; s < sg.end; ++s) {
+            if (!(sg.m >= 0 && s == sg.start)) {               // non-match step: multiply + normalize
+              double sum = 0.0;
+              for (int k = 0; k < K; ++k) { t[k] *= bm[k]; sum += t[k]; }
+              for (int k = 0; k < K; ++k) t[k] /= sum;
+            }
+            for (int k = 0; k < K; ++k) scr[static_cast<size_t>(s) * K + k] = std::log(t[k]);
+          }
         }
-        e.Ff[row + nrowF * c] = ff + lf[0];
-        e.Fb[row + nrowF * c] = fb + lb[0];
+      }
+
+      processColumn(rows.data(), depth, K,
+                    e.Ff + nrowF * c, e.Fb + nrowF * c, e.Of + nrowO * c, e.Ob + nrowO * c,
+                    scrF.data(), scrB.data());
+
+      // restore the scratch tables on the segments that were overwritten
+      for (size_t u = 0; u < segsOf[i].size(); ++u) {
+        const Seg& sg = segs[segsOf[i][u]];
+        const size_t a = static_cast<size_t>(sg.start) * K, b = static_cast<size_t>(sg.end) * K;
+        std::copy(ltrT.begin() + a, ltrT.begin() + b, scrF.begin() + a);
+        std::copy(ltrT.begin() + a, ltrT.begin() + b, scrB.begin() + a);
       }
     }
-
-    filt[row] = f + ltr[0];
   }
 }

@@ -185,7 +185,7 @@ forwardCpp <- function(emission_model, transition_model, data_seq,
         } else {
           matrix(0, 0, ncol(value_at_btf_knots))
         }
-        tralala::transition(
+        transition(
           filtering_log_probs[[latent_state]],   # modified in place
           out_logprobs[[latent_state]],          # modified in place
           value_at_btf_knots, btf_multiplicators, btf_knots, depth
@@ -324,7 +324,6 @@ transpose_list <- function(l) {
 
 
 # emission and transition grad
-#' @export
 paramLLGrad <- function(emission_model, transition_model, data_seq,
                         emission_regression_coefficients, transition_parameters){
   n_time <- length(data_seq$emissions)

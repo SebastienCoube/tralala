@@ -63,6 +63,7 @@ flattenParams <- function(params){
 }
 
 # shamefully stolen from R package UniLindleyApprox
+#' @export
 finiteDiffGrad <- function (fun, theta, eps = 1e-06, ...){
   n <- length(theta)
   gradient <- numeric(n)
